@@ -1,12 +1,12 @@
 ;;; xah-fly-keys.el --- ergonomic modal keybinding minor mode. -*- coding: utf-8; lexical-binding: t; -*-
 
-;; Copyright © 2013, 2026 by Xah Lee
+;; Copyright © 2013, 2024 by Xah Lee
 
 ;; Author: Xah Lee ( http://xahlee.info/ )
 ;; Maintainer: Xah Lee <xah@xahlee.org>
-;; Version: 28.11.20260204154143
+;; Version: 26.9.20241225173150
 ;; Created: 2013-09-10
-;; Package-Requires: ((emacs "28.3"))
+;; Package-Requires: ((emacs "27"))
 ;; Keywords: convenience, vi, vim, ergoemacs, keybinding
 ;; License: GPL v3.
 ;; Homepage: http://xahlee.info/emacs/misc/xah-fly-keys.html
@@ -26,9 +26,7 @@
 ;; Important command/insert mode switch keys:
 
 ;; M-x `xah-fly-command-mode-activate'
-;; or press <escape>
-;; or Alt+Space
-;; or Ctrl+Space.
+;; or press F8 or Alt+Space or Ctrl+Space or <escape>.
 ;; Note: if using emacs 28 or before, escape key only works when in emacs is running in graphical user interface mode.
 
 ;; M-x `xah-fly-insert-mode-activate'
@@ -74,7 +72,8 @@
 
 ;; When in command mode, the "SPC" is a leader key.
 
-;; if you want the following standard keys with Control
+;; the following standard keys with Control are supported:
+
 ;; "C-TAB" `xah-next-user-buffer'
 ;; "C-S-TAB" `xah-previous-user-buffer'
 ;; "C-v" paste
@@ -88,18 +87,11 @@
 ;; "C-+" `text-scale-increase'
 ;; "C--" `text-scale-decrease'
 
-;; add
-;; (setq xah-fly-use-control-key t)
+;; To disable both Control and Meta shortcut keys, add the following
+;; lines to you init.el BEFORE loading xah-fly-keys:
 
-;; To disable any change to Control keybinding
-;; add this to emacs init
 ;; (setq xah-fly-use-control-key nil)
-;; before loading xah-fly-keys
-
-;; To disable any change to meta keybinding
-;; add this to emacs init
 ;; (setq xah-fly-use-meta-key nil)
-;; before loading xah-fly-keys
 
 ;; If you have a bug, post on github.
 
@@ -150,14 +142,14 @@
 
 ;; supported layouts are stored in the variable xah-fly-layout-diagrams
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
 ;;; Code:
 
 (require 'dired)
 (require 'dired-x)
 (require 'seq)
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
 
 (defgroup xah-fly-keys nil
   "Ergonomic modal keybinding minor mode."
@@ -166,72 +158,59 @@
 (defvar xah-fly-command-mode-activate-hook nil "Hook for `xah-fly-command-mode-activate'")
 (defvar xah-fly-insert-mode-activate-hook nil "Hook for `xah-fly-insert-mode-activate'")
 
-(defcustom xah-fly-use-control-key t
-  "If true, change many emacs keybinding involving control key.
-Keys changed:
-Standard shortcut for open, close, copy, paste etc.
-Remove many redundant emacs default keys
-Must be set before loading xah-fly-keys."
+(defvar xah-fly-command-mode-indicator "c"
+  "Character in mode line indicating command mode is active.")
+(defvar xah-fly-insert-mode-indicator "i"
+  "Character in mode line indicating insert mode is active.")
+
+(defcustom xah-fly-use-control-key nil
+  "If true, standard keys for open, close, copy, paste etc, are bound, and others.
+If nil, do not modify any default emacs control key keybinding."
   :type 'boolean)
 
-(defcustom xah-fly-remove-control-x-keys nil
-  "If true, remove the whole C-x prefix keybinding.
-Must be set before loading xah-fly-keys."
-  :type 'boolean)
-
-(defcustom xah-fly-use-meta-key nil
-  "If true, change some emacs keybinding involving meta key.
-Remove many redundant emacs default keys.
-Must be set before loading xah-fly-keys."
+(defcustom xah-fly-use-meta-key t
+  "If nil, do not bind any meta key."
   :type 'boolean)
 
 (defcustom xah-fly-use-isearch-arrows t
- "If true, set keys in variable `isearch-mode-map' to use
- left/right arrow for backward/forward occurrences.
-up/down for search history.
-and C-v is paste.
-Must be set before loading xah-fly-keys."
- :type 'boolean)
+  "If nil, no change to any key in isearch (`isearch-forward'). Otherwise, arrow keys are for moving between occurrences, and C-v is paste."
+  :type 'boolean)
 
-(defcustom xah-fly-command-mode-hl-line t
- "If true, highlight current line when in command mode.
-Must be set before loading xah-fly-keys."
- :type 'boolean)
+(defun xah-fly-get-pos-block ()
+  "Return the begin end positions of current text block.
+Return value is a `vector'.
+Text block is group of lines separated by blank lines.
 
-(defcustom xah-fly-command-mode-cursor-color "red"
-  "Cursor color when in command mode.
-Value should be a string of color name. See `list-colors-display'.
-Default is red.
-If set to nil, use the color of current theme.
-Must be set before loading xah-fly-keys."
- :type '(string))
+URL `http://xahlee.info/emacs/emacs/elisp_get_text_block.html'
+Created: 2024-03-23
+Version: 2024-10-07"
+  (let (xbeg xend (xp (point)))
+    (save-excursion
+      (setq xbeg (if (re-search-backward "\n[ \t]*\n" nil 1) (match-end 0) (point)))
+      (goto-char xp)
+      (setq xend (if (re-search-forward "\n[ \t]*\n" nil 1) (match-beginning 0) (point))))
+    (vector xbeg xend)))
 
-(defcustom xah-fly-insert-mode-cursor-color "gray"
-  "Cursor color when in insert mode.
-Value should be a string of color name. See `list-colors-display'.
-Default is gray.
-If set to nil, use the color of current theme.
-Must be set before loading xah-fly-keys."
- :type '(string))
+(defun xah-fly-get-pos-block-or ()
+  "If region is active, return its [begin end] positions, else same as `xah-fly-get-pos-block'.
+Return value is a `vector'.
+Version: 2024-03-23"
+  (if (region-active-p)
+      (vector (region-beginning) (region-end))
+    (xah-fly-get-pos-block)))
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
 ;; cursor movement
 
 (defun xah-pop-local-mark-ring ()
   "Move cursor to last mark position of current buffer.
 Repeat call cycles all positions in `mark-ring'.
 
-After this command is called, press variable `xah-repeat-key' to repeat it.
-
 URL `http://xahlee.info/emacs/emacs/emacs_cycle_local_mark_ring.html'
 Created: 2016-04-04
-Version: 2025-07-28"
+Version: 2023-09-03"
   (interactive)
-  (set-mark-command t)
-  (set-transient-map
-   (let ((xkmap (make-sparse-keymap)))
-     (define-key xkmap (kbd (if (boundp 'xah-repeat-key) xah-repeat-key ".")) real-this-command)
-     xkmap)))
+  (set-mark-command t))
 
 (defun xah-beginning-of-line-or-block ()
   "Move cursor to beginning of indent or line, end of previous block, in that order.
@@ -245,14 +224,16 @@ Version: 2024-10-30"
   (let ((xp (point)))
     (if (or (eq (point) (line-beginning-position))
             (eq last-command this-command))
-        (when (re-search-backward "\n[\t\n ]*\n+" nil 1)
+        (when (re-search-backward "\n[\t\n ]*\n+" nil :move)
           (skip-chars-backward "\n\t ")
           ;; (forward-char)
           )
       (if visual-line-mode
           (beginning-of-visual-line)
         (if (eq major-mode 'eshell-mode)
-            (beginning-of-line)
+            (progn
+              (declare-function eshell-bol "esh-mode.el" ())
+              (eshell-bol))
           (back-to-indentation)
           (when (eq xp (point))
             (beginning-of-line)))))))
@@ -270,7 +251,7 @@ Version: 2024-10-30"
   (interactive)
   (if (or (eq (point) (line-end-position))
           (eq last-command this-command))
-      (re-search-forward "\n[\t\n ]*\n+" nil 1)
+      (re-search-forward "\n[\t\n ]*\n+" nil :move)
     (if visual-line-mode
         (end-of-visual-line)
       (end-of-line))))
@@ -300,77 +281,6 @@ Version: 2024-10-09"
        (define-key xkmap (kbd "<up>") #'xah-page-up)
        (define-key xkmap (kbd "<down>") #'xah-page-down)
        xkmap))))
-
-(defun xah-goto-char (&optional zposition)
-  "Move cursor to a position in current buffer or next buffer, at a number value under cursor.
-
-If `universal-argument' is called first, goto the specified position.
-If `universal-argument' value is 1, ask for a position.
-Else use the number under cursor.
-If no number is under cursor, ask for a position.
-
-If there is more than one pane (aka emacs window), goto position in that pane.
-
-URL `http://xahlee.info/emacs/emacs/emacs_goto_line_other_buffer.html'
-Created: 2025-04-10
-Version: 2025-11-13"
-  (interactive
-   (if current-prefix-arg
-       (if (eq 1 (prefix-numeric-value current-prefix-arg))
-           (list (read-number "goto position:"))
-         (list (prefix-numeric-value current-prefix-arg)))
-     nil))
-  (let ((xpos
-         (if zposition
-             zposition
-           (let (xbeg xend)
-             (skip-chars-backward "0-9")
-             (setq xbeg (point))
-             (skip-chars-forward "0-9")
-             (setq xend (point))
-             (if (eq xbeg xend)
-                 (progn (read-number "No number under cursor. goto position:"))
-               (string-to-number (buffer-substring-no-properties xbeg xend)))))))
-    (if (one-window-p)
-        nil
-      (other-window 1))
-    (goto-char xpos)))
-
-(defun xah-goto-line (&optional zline-num)
-  "Move cursor to a line in current buffer or next buffer, at a number value under cursor.
-
-If `universal-argument' is called first, goto the specified line number.
-If `universal-argument' value is 1, ask for a line number.
-Else use the number under cursor.
-If no number is under cursor, ask for a line number.
-
-If there is more than one pane (aka emacs window), goto the line number in that pane.
-
-URL `http://xahlee.info/emacs/emacs/emacs_goto_line_other_buffer.html'
-Created: 2025-04-10
-Version: 2025-11-13"
-  (interactive
-   (if current-prefix-arg
-       (if (eq 1 (prefix-numeric-value current-prefix-arg))
-           (list (read-number "goto line number:"))
-         (list (prefix-numeric-value current-prefix-arg)))
-     nil))
-  (let ((xline-num
-         (if zline-num
-             zline-num
-           (let (xbeg xend)
-             (skip-chars-backward "0-9")
-             (setq xbeg (point))
-             (skip-chars-forward "0-9")
-             (setq xend (point))
-             (if (eq xbeg xend)
-                 (progn (read-number "No number under cursor. goto line number:"))
-               (string-to-number (buffer-substring-no-properties xbeg xend)))))))
-    (if (one-window-p)
-        nil
-      (other-window 1))
-    (goto-char (point-min))
-    (forward-line xline-num)))
 
 (defvar xah-brackets '( "“”" "()" "[]" "{}" "<>" "＜＞" "（）" "［］" "｛｝" "⦅⦆" "〚〛" "⦃⦄" "‹›" "«»" "「」" "〈〉" "《》" "【】" "〔〕" "⦗⦘" "『』" "〖〗" "〘〙" "｢｣" "⟦⟧" "⟨⟩" "⟪⟫" "⟮⟯" "⟬⟭" "⌈⌉" "⌊⌋" "⦇⦈" "⦉⦊" "❛❜" "❝❞" "❨❩" "❪❫" "❴❵" "❬❭" "❮❯" "❰❱" "❲❳" "〈〉" "⦑⦒" "⧼⧽" "﹙﹚" "﹛﹜" "﹝﹞" "⁽⁾" "₍₎" "⦋⦌" "⦍⦎" "⦏⦐" "⁅⁆" "⸢⸣" "⸤⸥" "⟅⟆" "⦓⦔" "⦕⦖" "⸦⸧" "⸨⸩" "｟｠")
  "A list of strings, each element is a string of 2 chars, the left bracket and a matching right bracket.
@@ -409,10 +319,10 @@ The list of brackets to jump to is defined by `xah-left-brackets' and `xah-right
 
 URL `http://xahlee.info/emacs/emacs/emacs_navigating_keys_for_brackets.html'
 Created: 2016-11-22
-Version: 2025-11-18"
+Version: 2024-06-15"
   (interactive)
   (if (nth 3 (syntax-ppss))
-      (backward-up-list 1 t t)
+      (backward-up-list 1 'ESCAPE-STRINGS 'NO-SYNTAX-CROSSING)
     (cond
      ((eq (char-after) ?\") (forward-sexp))
      ((eq (char-before) ?\") (backward-sexp))
@@ -426,10 +336,10 @@ Version: 2025-11-18"
           (forward-char)))
       (backward-sexp)
       (while (looking-at "\\s'") (forward-char)))
-     (t (backward-up-list 1 t t)))))
+     (t (backward-up-list 1 'ESCAPE-STRINGS 'NO-SYNTAX-CROSSING)))))
 
 (defvar xah-punctuation-regex nil "A regex string for the purpose of moving cursor to a punctuation.")
-(setq xah-punctuation-regex "\"")
+(setq xah-punctuation-regex "[\"]")
 
 (defun xah-forward-punct ()
   "Move cursor to the next occurrence of punctuation.
@@ -437,13 +347,8 @@ Punctuations is defined by `xah-punctuation-regex'
 
 URL `http://xahlee.info/emacs/emacs/emacs_jump_to_punctuations.html'
 Created: 2017-06-26
-Version: 2025-07-18"
+Version: 2024-01-20"
   (interactive)
-  (set-transient-map
-   (let ((xkmap (make-sparse-keymap)))
-     (define-key xkmap (kbd "<left>") #'xah-backward-punct)
-     (define-key xkmap (kbd "<right>") #'xah-forward-punct)
-     xkmap))
   (re-search-forward xah-punctuation-regex nil t))
 
 (defun xah-backward-punct ()
@@ -452,34 +357,29 @@ See `xah-forward-punct'
 
 URL `http://xahlee.info/emacs/emacs/emacs_jump_to_punctuations.html'
 Created: 2017-06-26
-Version: 2025-07-18"
+Version: 2024-01-20"
   (interactive)
-  (set-transient-map
-   (let ((xkmap (make-sparse-keymap)))
-     (define-key xkmap (kbd "<left>") #'xah-backward-punct)
-     (define-key xkmap (kbd "<right>") #'xah-forward-punct)
-     xkmap))
   (re-search-backward xah-punctuation-regex nil t))
 
 (defun xah-sort-lines ()
   "Like `sort-lines' but if no region, do the current block.
 Created: 2022-01-22
-Version: 2025-03-25"
+Version: 2024-03-19"
   (interactive)
   (let (xbeg xend)
-    (setq xbeg (if (region-active-p) (region-beginning) (save-excursion (if (re-search-backward "\n[ \t]*\n" nil 1) (match-end 0) (point)))) xend (if (region-active-p) (region-end) (save-excursion (if (re-search-forward "\n[ \t]*\n" nil 1) (match-beginning 0) (point)))))
+    (seq-setq (xbeg xend) (xah-fly-get-pos-block-or))
     (sort-lines current-prefix-arg xbeg xend)))
 
 (defun xah-narrow-to-region ()
   "Same as `narrow-to-region', but if no selection, narrow to the current block.
 Created: 2022-01-22
-Version: 2025-03-25"
+Version: 2024-03-19"
   (interactive)
   (let (xbeg xend)
-    (setq xbeg (if (region-active-p) (region-beginning) (save-excursion (if (re-search-backward "\n[ \t]*\n" nil 1) (match-end 0) (point)))) xend (if (region-active-p) (region-end) (save-excursion (if (re-search-forward "\n[ \t]*\n" nil 1) (match-beginning 0) (point)))))
+    (seq-setq (xbeg xend) (xah-fly-get-pos-block-or))
     (narrow-to-region xbeg xend)))
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
 ;; editing commands
 
 (defun xah-copy-line-or-region ()
@@ -541,7 +441,6 @@ Version: 2015-06-10"
 Respects `narrow-to-region'.
 
 URL `http://xahlee.info/emacs/emacs/emacs_copy_cut_all_or_region.html'
-Created: 2015-08-22
 Version: 2015-08-22"
   (interactive)
   (if (region-active-p)
@@ -557,8 +456,7 @@ Version: 2015-08-22"
 Respects `narrow-to-region'.
 
 URL `http://xahlee.info/emacs/emacs/emacs_copy_cut_all_or_region.html'
-Created: 2015-08-22
-Version: 2025-08-06"
+Version: 2015-08-22"
   (interactive)
   (if (region-active-p)
       (progn
@@ -566,8 +464,23 @@ Version: 2025-08-06"
         (delete-region (region-beginning) (region-end)))
     (progn
       (kill-new (buffer-string))
-      (delete-region (point-min) (point-max))
-      (message "buffer text cut"))))
+      (delete-region (point-min) (point-max)))))
+
+(defun xah-copy-all ()
+  "Put the whole buffer content into the `kill-ring'.
+(respects `narrow-to-region')
+Version: 2016-10-06"
+  (interactive)
+  (kill-new (buffer-string))
+  (message "Buffer content copied."))
+
+(defun xah-cut-all ()
+  "Cut the whole buffer content into the `kill-ring'.
+Respects `narrow-to-region'.
+Version: 2017-01-03"
+  (interactive)
+  (kill-new (buffer-string))
+  (delete-region (point-min) (point-max)))
 
 (defun xah-paste-or-paste-previous ()
   "Paste. When called repeatedly, paste previous.
@@ -589,8 +502,6 @@ Version: 2020-09-08"
       (if (eq real-last-command this-command)
           (yank-pop 1)
         (yank)))))
-
-(defalias 'xah-show-copy-history 'xah-show-kill-ring)
 
 (defun xah-show-kill-ring ()
   "Insert all `kill-ring' content in a new buffer named *copy history*.
@@ -621,11 +532,11 @@ Version: 2022-03-04"
         xbeg ; prev Block Begin
         xend ; prev Block end
         )
-    (if (re-search-forward "\n[ \t]*\n+" nil 1)
+    (if (re-search-forward "\n[ \t]*\n+" nil "move")
         (setq xc2 (match-beginning 0))
       (setq xc2 (point)))
     (goto-char xp0)
-    (if (re-search-backward "\n[ \t]*\n+" nil 1)
+    (if (re-search-backward "\n[ \t]*\n+" nil "move")
         (progn
           (skip-chars-backward "\n \t")
           (setq xend (point))
@@ -633,7 +544,7 @@ Version: 2022-03-04"
           (setq xc1 (point)))
       (error "No previous block."))
     (goto-char xend)
-    (if (re-search-backward "\n[ \t]*\n+" nil 1)
+    (if (re-search-backward "\n[ \t]*\n+" nil "move")
         (progn
           (setq xbeg (match-end 0)))
       (setq xbeg (point)))
@@ -658,17 +569,17 @@ Version: 2022-03-04"
         )
     (if (eq (point-min) (point))
         (setq xc1 (point))
-      (if (re-search-backward "\n\n+" nil 1)
+      (if (re-search-backward "\n\n+" nil "move")
           (progn
             (setq xc1 (match-end 0)))
         (setq xc1 (point))))
     (goto-char xp0)
-    (if (re-search-forward "\n[ \t]*\n+" nil 1)
+    (if (re-search-forward "\n[ \t]*\n+" nil "move")
         (progn
           (setq xc2 (match-beginning 0))
           (setq xn1 (match-end 0)))
       (error "No next block."))
-    (if (re-search-forward "\n[ \t]*\n+" nil 1)
+    (if (re-search-forward "\n[ \t]*\n+" nil "move")
         (progn
           (setq xn2 (match-beginning 0)))
       (setq xn2 (point)))
@@ -769,15 +680,19 @@ Version: 2024-06-06"
           (kill-region xbeg xend))))))
 
 (defvar xah-smart-delete-dispatch
-  '((xah-wolfram-mode . xah-wolfram-smart-delete-backward)
-    (xah-html-mode . xah-html-smart-delete-backward))
+  nil
   "Used by `xah-smart-delete'.
 This makes that function behavior dependent on current major-mode.
 Value is Alist of pairs, each is of the form
 (‹major-mode-name› . ‹function-name›)
 If ‹major-mode-name› match current var `major-mode', the paired function is called.
 If no major mode matches, `xah-smart-delete' default behavior is used.
+
 Version: 2024-06-05")
+
+(setq xah-smart-delete-dispatch
+      '((xah-wolfram-mode . xah-wolfram-smart-delete-backward)
+        (xah-html-mode . xah-html-smart-delete-backward)))
 
 (defun xah-smart-delete (&optional BracketOnly SkipDispatch)
   "Smart backward delete.
@@ -796,29 +711,25 @@ If `universal-argument' is called first, do not delete bracket's innertext.
 In elisp code, arg BracketOnly if true, do not delete innertext. SkipDispatch if true, skip checking `xah-smart-delete-dispatch'.
 
 Created: 2023-07-22
-Version: 2025-07-30"
+Version: 2024-06-05"
   (interactive (list current-prefix-arg nil))
   (let (xfun)
     (cond
      ((and (not SkipDispatch) (setq xfun (assq major-mode xah-smart-delete-dispatch)))
       (message "calling cdr of %s" xfun)
       (funcall (cdr xfun)))
-     ((region-active-p)
-      (kill-region (region-beginning) (region-end)))
+     ((region-active-p) (delete-region (region-beginning) (region-end)))
      ((or
        ;; 32 is space, 9 is tab, 10 is newline
        (eq (char-before) 32)
        (eq (char-before) 10)
        (eq (char-before) 9))
-      (if (minibufferp (current-buffer))
-          (while (or (eq (char-before) 32) (eq (char-before) 10) (eq (char-before) 9))
-            (delete-char -1))
-        (let ((xp0 (point)) xbeg xend)
-          (skip-chars-backward " \t\n")
-          (setq xbeg (point) xend xp0)
-          (if (eq real-this-command real-last-command)
-              (kill-append (delete-and-extract-region xbeg xend) t)
-            (kill-region xbeg xend)))))
+      (let ((xp0 (point)) xbeg xend)
+        (skip-chars-backward " \t\n")
+        (setq xbeg (point) xend xp0)
+        (if (eq real-this-command real-last-command)
+            (kill-append (delete-and-extract-region xbeg xend) t)
+          (kill-region xbeg xend))))
      ((prog2 (backward-char) (looking-at "\\s)") (forward-char))
       ;; (message "cursor left is closing bracket")
       (cond
@@ -899,24 +810,24 @@ followed by 2 spaces.
 
 URL `http://xahlee.info/emacs/emacs/elisp_change_brackets.html'
 Created: 2020-11-01
-Version: 2025-10-13"
+Version: 2024-08-07"
   (interactive
    (let ((xbrackets
           '(
             "square [ ]"
             "brace { }"
             "paren ( )"
-            "less greater than < >"
-            "QUOTATION MARK \" \""
-            "APOSTROPHE ' '"
+            "greater < >"
+            "double quote \" \""
+            "single quote ' '"
             "emacs ` '"
-            "GRAVE ACCENT ` `"
+            "markdown grave accent ` `"
             "double square [[ ]]"
             "tilde ~ ~"
             "equal = ="
             "double curly quote “ ”"
             "single curly quote ‘ ’"
-            "french angle quote ‹ ›"
+            "french angle ‹ ›"
             "french double angle « »"
             "corner 「 」"
             "white corner 『 』"
@@ -945,25 +856,25 @@ Version: 2025-10-13"
             "medium pointing angle ornament ❬ ❭"
             "heavy pointing angle quotation mark ornament ❮ ❯"
             "heavy pointing angle ornament ❰ ❱"
-            "square bracket with underbar ⦋ ⦌"
-            "none  ")))
+            "none  "
+            )))
      (let ((completion-ignore-case t))
        (list
         (completing-read "Replace this:" xbrackets nil t nil nil (car xbrackets))
         (completing-read "To:" xbrackets nil t nil nil (car (last xbrackets)))))))
   (let (xbeg xend xleft xright xtoL xtoR)
-    (setq xbeg (if (region-active-p) (region-beginning) (save-excursion (if (re-search-backward "\n[ \t]*\n" nil 1) (match-end 0) (point)))) xend (if (region-active-p) (region-end) (save-excursion (if (re-search-forward "\n[ \t]*\n" nil 1) (match-beginning 0) (point)))))
+    (seq-setq (xbeg xend) (xah-fly-get-pos-block-or))
     (let ((xsFrom (last (split-string FromChars " ") 2))
           (xsTo (last (split-string ToChars " ") 2)))
 
-      ;; (when (length< xsFrom 3)
+      ;; (when (< (length xsFrom) 3)
       ;; (error "cannot find input brackets %s" xsFrom))
 
-      ;; (when (length< xsTo 3)
+      ;; (when (< (length xsTo) 3)
       ;;   (message "replace blacket is empty string")
       ;;   (setq xsTo (list "" "" "")))
 
-      (setq xleft (car xsFrom) xright (car (cdr xsFrom))
+      (setq xleft (car xsFrom)  xright (car (cdr xsFrom))
             xtoL (car xsTo) xtoR (car (cdr xsTo)))
 
       (save-excursion
@@ -1030,35 +941,35 @@ Version: 2024-06-17"
 
 URL `http://xahlee.info/emacs/emacs/emacs_toggle_letter_case.html'
 Created: 2015-12-22
-Version: 2026-01-06"
+Version: 2023-11-14"
   (interactive)
   (let ((case-fold-search nil))
-    (backward-char)
+    (left-char 1)
     (cond
      ((looking-at "[[:lower:]]") (upcase-region (point) (1+ (point))))
      ((looking-at "[[:upper:]]") (downcase-region (point) (1+ (point)))))
-    (forward-char)))
+    (right-char)))
 
 (defun xah-upcase-sentence ()
   "Upcase first letters of sentences of current block or selection.
 
 URL `http://xahlee.info/emacs/emacs/emacs_upcase_sentence.html'
 Created: 2020-12-08
-Version: 2025-03-25"
+Version: 2024-03-19"
   (interactive)
   (let (xbeg xend)
-    (setq xbeg (if (region-active-p) (region-beginning) (save-excursion (if (re-search-backward "\n[ \t]*\n" nil 1) (match-end 0) (point)))) xend (if (region-active-p) (region-end) (save-excursion (if (re-search-forward "\n[ \t]*\n" nil 1) (match-beginning 0) (point)))))
+    (seq-setq (xbeg xend) (xah-fly-get-pos-block-or))
     (save-restriction
       (narrow-to-region xbeg xend)
       (let ((case-fold-search nil))
         ;; after period or question mark or exclamation
         (goto-char (point-min))
-        (while (re-search-forward "\\(\\.\\|\\?\\|!\\)[ \n]+ *\\([a-z]\\)" nil 1)
+        (while (re-search-forward "\\(\\.\\|\\?\\|!\\)[ \n]+ *\\([a-z]\\)" nil :move)
           (upcase-region (match-beginning 2) (match-end 2))
           (overlay-put (make-overlay (match-beginning 2) (match-end 2)) 'face 'highlight))
         ;; after a blank line, after a bullet, or beginning of buffer
         (goto-char (point-min))
-        (while (re-search-forward "\\(\\`\\|• \\|\n\n\\)\\([a-z]\\)" nil 1)
+        (while (re-search-forward "\\(\\`\\|• \\|\n\n\\)\\([a-z]\\)" nil :move)
           (upcase-region (match-beginning 2) (match-end 2))
           (overlay-put (make-overlay (match-beginning 2) (match-end 2)) 'face 'highlight))
         ;; for HTML. first letter after tag
@@ -1072,7 +983,7 @@ Version: 2025-03-25"
              (eq major-mode 'mhtml-mode))
           (goto-char (point-min))
           (while
-              (re-search-forward "\\(<title>[ \n]?\\|<h[1-6]>[ \n]?\\|<p>[ \n]?\\|<li>[ \n]?\\|<dd>[ \n]?\\|<td>[ \n]?\\|<br ?/?>[ \n]?\\|<figcaption>[ \n]?\\)\\([a-z]\\)" nil 1)
+              (re-search-forward "\\(<title>[ \n]?\\|<h[1-6]>[ \n]?\\|<p>[ \n]?\\|<li>[ \n]?\\|<dd>[ \n]?\\|<td>[ \n]?\\|<br ?/?>[ \n]?\\|<figcaption>[ \n]?\\)\\([a-z]\\)" nil :move)
             (upcase-region (match-beginning 2) (match-end 2))
             (overlay-put (make-overlay (match-beginning 2) (match-end 2)) 'face 'highlight))))
       (goto-char (point-max)))
@@ -1145,10 +1056,10 @@ Version: 2021-09-19"
   "Add a space after comma of current block or selection.
 and highlight changes made.
 Created: 2022-01-20
-Version: 2025-03-25"
+Version: 2024-03-19"
   (interactive)
   (let (xbeg xend)
-    (setq xbeg (if (region-active-p) (region-beginning) (save-excursion (if (re-search-backward "\n[ \t]*\n" nil 1) (match-end 0) (point)))) xend (if (region-active-p) (region-end) (save-excursion (if (re-search-forward "\n[ \t]*\n" nil 1) (match-beginning 0) (point)))))
+    (seq-setq (xbeg xend) (xah-fly-get-pos-block-or))
     (save-restriction
       (narrow-to-region xbeg xend)
       (goto-char (point-min))
@@ -1160,75 +1071,160 @@ Version: 2025-03-25"
           (match-beginning 0)
           (match-end 0)) 'face 'highlight)))))
 
+(defun xah-toggle-read-novel-mode ()
+  "Setup current frame to be suitable for reading long novel/article text.
+• Set frame width to 70
+• Line wrap at word boundaries.
+• Line spacing is increased.
+• Proportional width font is used.
+Call again to toggle back.
+
+URL `http://xahlee.info/emacs/emacs/emacs_novel_reading_mode.html'
+Created: 2019-01-30
+Version: 2021-01-16"
+  (interactive)
+  (if (eq (frame-parameter (selected-frame) 'width) 70)
+      (progn
+        (set-frame-parameter (selected-frame) 'width 106)
+        (variable-pitch-mode 0)
+        (setq line-spacing nil)
+        (setq word-wrap nil))
+    (progn
+      (set-frame-parameter (selected-frame) 'width 70)
+      (variable-pitch-mode 1)
+      (setq line-spacing 0.5)
+      (setq word-wrap t)))
+  (redraw-frame (selected-frame)))
+
 (defun xah-fill-or-unfill ()
   "Reformat current block or selection to short/long line.
-First call breaks text into multiple lines. Repeated call toggles between multiple and singe line.
+First call will break into multiple short lines. Repeated call toggles between short and long lines.
 This commands calls `fill-region' to do its work. Set `fill-column' for short line length.
 
-URL `http://xahlee.info/emacs/emacs/emacs_unfill-paragraph.html'
+URL `http://xahlee.info/emacs/emacs/modernization_fill-paragraph.html'
 Created: 2020-11-22
-Version: 2025-08-29"
+Version: 2024-03-19"
   (interactive)
   ;; This command symbol has a property “'longline-p”, the possible values are t and nil. This property is used to easily determine whether to compact or uncompact, when this command is called again
-  (let ((xisLongline (if (eq last-command this-command) (get this-command 'longline-p) t))
-        (deactivate-mark nil)
-        xbeg xend)
-    (setq xbeg (if (region-active-p) (region-beginning) (save-excursion (if (re-search-backward "\n[ \t]*\n" nil 1) (match-end 0) (point)))) xend (if (region-active-p) (region-end) (save-excursion (if (re-search-forward "\n[ \t]*\n" nil 1) (match-beginning 0) (point)))))
+  (let ( (xisLongline (if (eq last-command this-command) (get this-command 'longline-p) t))
+         (deactivate-mark nil)
+         xbeg xend )
+    (seq-setq (xbeg xend) (xah-fly-get-pos-block-or))
     (if xisLongline
         (fill-region xbeg xend)
-      (let ((fill-column 99999))
+      (let ((fill-column 99999 ))
         (fill-region xbeg xend)))
     (put this-command 'longline-p (not xisLongline))))
+
+(defun xah-unfill-paragraph ()
+  "Replace newline chars in current paragraph by single spaces.
+This command does the inverse of `fill-paragraph'.
+
+URL `http://xahlee.info/emacs/emacs/emacs_unfill-paragraph.html'
+Created: 2010-05-12
+Version: 2022-05-20"
+  (interactive)
+  (let ((fill-column 90002000))
+    (fill-paragraph)))
+
+(defun xah-unfill-region (Begin End)
+  "Replace newline chars in region by single spaces.
+This command does the inverse of `fill-region'.
+
+URL `http://xahlee.info/emacs/emacs/emacs_unfill-paragraph.html'
+Created: 2010-05-12
+Version: 2022-05-20"
+  (interactive "r")
+  (let ((fill-column 90002000))
+    (fill-region Begin End)))
+
+(defun xah-change-newline-chars-to-one (Begin End)
+  "Replace newline char sequence by just one.
+
+URL `http://xahlee.info/emacs/emacs/emacs_reformat_lines.html'
+Version: 2021-07-06"
+  (interactive "r")
+  (save-excursion
+    (save-restriction
+      (narrow-to-region Begin End)
+      (goto-char (point-min))
+      (while (re-search-forward "\n\n+" nil :move) (replace-match "\n")))))
+
+(defun xah-reformat-whitespaces-to-one-space (Begin End)
+  "Replace whitespaces by one space.
+
+URL `http://xahlee.info/emacs/emacs/emacs_reformat_lines.html'
+Created: 2017-01-11
+Version: 2022-01-08"
+  (interactive "r")
+  (save-restriction
+      (narrow-to-region Begin End)
+      (goto-char (point-min))
+      (while (search-forward "\n" nil :move) (replace-match " "))
+      (goto-char (point-min))
+      (while (search-forward "\t" nil :move) (replace-match " "))
+      (goto-char (point-min))
+      (while (re-search-forward " +" nil :move) (replace-match " "))
+      (goto-char (point-max))))
+
+(defun xah-reformat-to-multi-lines ( &optional Begin End MinLength)
+  "Replace spaces by a newline at ~70 chars, on current block or selection.
+If `universal-argument' is called first, ask user for max width.
+
+URL `http://xahlee.info/emacs/emacs/emacs_reformat_lines.html'
+Created: 2018-12-16
+Version: 2024-03-19"
+  (interactive)
+  (let ( xbeg xend xminlen )
+    (setq xminlen (if MinLength MinLength (if current-prefix-arg (prefix-numeric-value current-prefix-arg) fill-column)))
+    (if (and Begin End)
+        (setq xbeg Begin xend End)
+      (seq-setq (xbeg xend) (xah-fly-get-pos-block-or)))
+    (save-excursion
+      (save-restriction
+        (narrow-to-region xbeg xend)
+        (goto-char (point-min))
+        (while (re-search-forward " +" nil :move)
+          (when (> (- (point) (line-beginning-position)) xminlen)
+            (replace-match "\n" )))))))
 
 (defun xah-reformat-lines (&optional Width)
   "Reformat current block or selection into short lines or 1 long line.
 When called for the first time, change to one line. Second call change it to multi-lines. Repeated call toggles.
-If `universal-argument' is called first, ask user to type max length of line. By default, it is 70.
+If `universal-argument' is called first, ask user to type max length of line. By default, it is 66.
 
 Note: this command is different from emacs `fill-region' or `fill-paragraph'.
 This command never adds or delete non-whitespace chars. It only exchange whitespace sequence.
 
 URL `http://xahlee.info/emacs/emacs/emacs_reformat_lines.html'
-Created: 2016
-Version: 2025-09-07"
-  (interactive
-   (list
-    (if current-prefix-arg
-        (cond
-         ((not (numberp current-prefix-arg)) 70)
-         (t (prefix-numeric-value current-prefix-arg)))
-      80)))
+Created 2016 or before.
+Created: 2021-07-05
+Version: 2024-03-19"
+  (interactive)
   ;; This symbol has a property 'is-long-p, the possible values are t and nil. This property is used to easily determine whether to compact or uncompact, when this command is called again
-  (let ((xisLong (if (eq last-command this-command) (get this-command 'is-long-p) nil))
-        (xwidth (if Width Width 70))
-        xbeg xend)
-    (setq xbeg (if (region-active-p) (region-beginning) (save-excursion (if (re-search-backward "\n[ \t]*\n" nil 1) (match-end 0) (point)))) xend (if (region-active-p) (region-end) (save-excursion (if (re-search-forward "\n[ \t]*\n" nil 1) (match-beginning 0) (point)))))
-    (if xisLong
-        (save-excursion
-          (save-restriction
-            (narrow-to-region xbeg xend)
-            (goto-char (point-min))
-            (while (re-search-forward " +" nil 1)
-              (when (> (- (point) (line-beginning-position)) xwidth)
-                (replace-match "\n")))))
-      (save-excursion
-        (save-restriction
-          (narrow-to-region xbeg xend)
-          (goto-char (point-min))
-          (while (re-search-forward "[ \n\t]+" xend 1) (replace-match " ")))))
+  (let (xisLong xwidth xbeg xend)
+    (setq xwidth (if Width Width (if current-prefix-arg (prefix-numeric-value current-prefix-arg) 66)))
+    (setq xisLong (if (eq last-command this-command) (get this-command 'is-long-p) nil))
+    (seq-setq (xbeg xend) (xah-fly-get-pos-block-or))
+    (if current-prefix-arg
+        (xah-reformat-to-multi-lines xbeg xend xwidth)
+      (if xisLong
+          (xah-reformat-to-multi-lines xbeg xend xwidth)
+        (progn
+          (xah-reformat-whitespaces-to-one-space xbeg xend))))
     (put this-command 'is-long-p (not xisLong))))
 
 (defun xah-reformat-to-sentence-lines ()
   "Reformat current block or selection into multiple lines by ending period.
 Move cursor to the beginning of next text block.
-After this command is called, press variable `xah-repeat-key' to repeat it.
+After this command is called, press `xah-repeat-key' to repeat it.
 
 URL `http://xahlee.info/emacs/emacs/elisp_reformat_to_sentence_lines.html'
 Created: 2020-12-02
-Version: 2025-05-21"
+Version: 2024-03-19"
   (interactive)
   (let (xbeg xend)
-    (setq xbeg (if (region-active-p) (region-beginning) (save-excursion (if (re-search-backward "\n[ \t]*\n" nil 1) (match-end 0) (point)))) xend (if (region-active-p) (region-end) (save-excursion (if (re-search-forward "\n[ \t]*\n" nil 1) (match-beginning 0) (point)))))
+    (seq-setq (xbeg xend) (xah-fly-get-pos-block-or))
     (save-restriction
       (narrow-to-region xbeg xend)
       (goto-char (point-min)) (while (search-forward "。" nil t) (replace-match "。\n"))
@@ -1243,27 +1239,22 @@ Version: 2025-05-21"
       (goto-char (point-min))
       (while (re-search-forward "  +" nil t) (replace-match " "))
       (goto-char (point-min))
-      (while (re-search-forward "\\([.?!]\\) +\\([(0-9A-Za-z<]+\\)" nil t) (replace-match "\\1\n\\2"))
-      (goto-char (point-min))
-      (while (re-search-forward "\\(<br ?/?>\\)" nil t) (replace-match "\\1\n"))
-
-      (goto-char (point-min))
-      (while (search-forward "e.g.\n" nil t) (replace-match "e.g. "))
-
+      (while (re-search-forward "\\([.?!]\\) +\\([(0-9A-Za-z]+\\)" nil t) (replace-match "\\1\n\\2"))
       (goto-char (point-max))
       (while (eq (char-before) 32) (delete-char -1))))
-  (re-search-forward "\n+" nil 1)
-  (set-transient-map (let ((xkmap (make-sparse-keymap))) (define-key xkmap (kbd (if (boundp 'xah-repeat-key) xah-repeat-key ".")) this-command) xkmap)))
+  (re-search-forward "\n+" nil :move)
+  (set-transient-map (let ((xkmap (make-sparse-keymap))) (define-key xkmap (kbd (or xah-repeat-key "m")) this-command) xkmap))
+  (set-transient-map (let ((xkmap (make-sparse-keymap))) (define-key xkmap (kbd "DEL") this-command) xkmap)))
 
 (defun xah-space-to-newline ()
   "Replace space sequence to a newline char in current block or selection.
 
 URL `http://xahlee.info/emacs/emacs/emacs_space_to_newline.html'
 Created: 2017-08-19
-Version: 2025-03-25"
+Version: 2024-03-19"
   (interactive)
   (let (xbeg xend)
-    (setq xbeg (if (region-active-p) (region-beginning) (save-excursion (if (re-search-backward "\n[ \t]*\n" nil 1) (match-end 0) (point)))) xend (if (region-active-p) (region-end) (save-excursion (if (re-search-forward "\n[ \t]*\n" nil 1) (match-beginning 0) (point)))))
+    (seq-setq (xbeg xend) (xah-fly-get-pos-block-or))
     (save-restriction
       (narrow-to-region xbeg xend)
       (goto-char (point-min))
@@ -1423,7 +1414,7 @@ In lisp code, QuoteL QuoteR Sep are strings.
 
 URL `http://xahlee.info/emacs/emacs/emacs_quote_lines.html'
 Created: 2020-06-26
-Version: 2025-03-25"
+Version: 2024-11-24"
   (interactive
    (let ((xbrackets
           '(
@@ -1468,19 +1459,19 @@ Version: 2025-03-25"
             (t xsepChoice)))
      (list xquoteL xquoteR xsep)))
   (let (xbeg xend (xquoteL QuoteL) (xquoteR QuoteR) (xsep Sep))
-    (setq xbeg (if (region-active-p) (region-beginning) (save-excursion (if (re-search-backward "\n[ \t]*\n" nil 1) (match-end 0) (point)))) xend (if (region-active-p) (region-end) (save-excursion (if (re-search-forward "\n[ \t]*\n" nil 1) (match-beginning 0) (point)))))
+    (seq-setq (xbeg xend) (xah-fly-get-pos-block-or))
     (save-excursion
       (save-restriction
         (narrow-to-region xbeg xend)
         (goto-char (point-min))
-        (catch 1111
+        (catch 'EndReached
           (while t
             (skip-chars-forward "\t ")
             (insert xquoteL)
             (end-of-line)
             (insert xquoteR xsep)
             (if (eq (point) (point-max))
-                (throw 1111 t)
+                (throw 'EndReached t)
               (forward-char))))))))
 
 (defun xah-escape-quotes (Begin End)
@@ -1488,23 +1479,22 @@ Version: 2025-03-25"
 Double quote is codepoint 34.
 See also: `xah-unescape-quotes'
 URL `http://xahlee.info/emacs/emacs/elisp_escape_quotes.html'
-Created: 2010-08-16
-Version: 2025-11-23"
+Version: 2017-01-11"
   (interactive
    (if (region-active-p)
        (list (region-beginning) (region-end))
      (list (line-beginning-position) (line-end-position))))
   (save-excursion
-    (save-restriction
-      (narrow-to-region Begin End)
-      (goto-char (point-min))
-      (while (search-forward "\"" nil t)
-        (replace-match "\\\"" t t))))
-  (message "done. %s" real-this-command))
+      (save-restriction
+        (narrow-to-region Begin End)
+        (goto-char (point-min))
+        (while (search-forward "\"" nil t)
+          (replace-match "\\\"" t t)))))
 
 (defun xah-unescape-quotes (&optional Begin End)
-  "Replace 「\\\"」 by 「\"」 in current line or selection.
+  "Replace  「\\\"」 by 「\"」 in current line or selection.
 See also: `xah-escape-quotes'
+
 URL `http://xahlee.info/emacs/emacs/elisp_escape_quotes.html'
 Created: 2017-01-11
 Version: 2023-11-02"
@@ -1520,8 +1510,7 @@ Version: 2023-11-02"
         (narrow-to-region xbeg xend)
         (goto-char (point-min))
         (while (search-forward "\\\"" nil t)
-          (replace-match "\"" t t)))))
-  (message "done. %s" real-this-command))
+          (replace-match "\"" t t))))))
 
 (defun xah-cycle-hyphen-lowline-space (&optional Begin End)
   "Cycle {hyphen lowline space} chars.
@@ -1531,11 +1520,11 @@ The region to work on is by this order:
  2. If cursor is in a string quote or any type of bracket, and is within current line, work on that region.
  3. else, work on current line.
 
-After this command is called, press variable `xah-repeat-key' to repeat it.
+After this command is called, press `xah-repeat-key' to repeat it.
 
 URL `http://xahlee.info/emacs/emacs/elisp_change_space-hyphen_underscore.html'
 Created: 2019-02-12
-Version: 2025-01-24"
+Version: 2024-01-04"
   (interactive)
   ;; this function sets a property 'state. Possible values are 0 to length of xcharArray.
   (let (xbeg xend xlen
@@ -1567,7 +1556,7 @@ Version: 2025-01-24"
       (push-mark xbeg)
       (setq deactivate-mark nil))
     (put 'xah-cycle-hyphen-lowline-space 'state (% (+ xnowState 1) xlen)))
-  (set-transient-map (let ((xkmap (make-sparse-keymap))) (define-key xkmap (kbd (if (boundp 'xah-repeat-key) xah-repeat-key ".")) this-command) xkmap)))
+  (set-transient-map (let ((xkmap (make-sparse-keymap))) (define-key xkmap (kbd (or xah-repeat-key "m")) this-command) xkmap)))
 
 (defun xah-copy-file-path (&optional DirPathOnlyQ)
   "Copy current buffer file path or dired path.
@@ -1580,18 +1569,17 @@ If a buffer is not file and not dired, copy value of `default-directory'.
 
 URL `http://xahlee.info/emacs/emacs/emacs_copy_file_path.html'
 Created: 2018-06-18
-Version: 2025-05-23"
+Version: 2024-12-15"
   (interactive "P")
-  (let (xfpath)
-    (setq xfpath
-          (if (eq major-mode 'dired-mode)
-              (progn
-                (let ((xresult (mapconcat #'identity
-                                          (dired-get-marked-files) "\n")))
-                  (if (length= xresult 0)
-                      default-directory
-                    xresult)))
-            (or buffer-file-name default-directory)))
+  (let ((xfpath
+         (if (eq major-mode 'dired-mode)
+             (progn
+               (let ((xresult (mapconcat #'identity
+                                         (dired-get-marked-files) "\n")))
+                 (if (equal (length xresult) 0)
+                     (progn default-directory)
+                   (progn xresult))))
+           (or buffer-file-name default-directory))))
     (kill-new
      (if DirPathOnlyQ
          (progn
@@ -1615,44 +1603,70 @@ Version: 2024-10-07"
         (setq xbeg (region-beginning) xend (region-end))
       (progn
         (setq xbeg
-              (if (re-search-backward "\n[ \t]*\n+" nil 1)
+              (if (re-search-backward "\n[ \t]*\n+" nil :move)
                   (match-end 0)
                 (point)))
         (goto-char xp)
-        (setq xend (if (re-search-forward "\n[ \t]*\n+" nil 1)
+        (setq xend (if (re-search-forward "\n[ \t]*\n+" nil :move)
                        (match-end 0)
                      (point-max)))))
     (kill-region xbeg xend)))
 
 (defun xah-copy-to-register-1 ()
-  "Copy selection or text block to register 1.
+  "Copy current line or selection to register 1.
+
+See also:
+`xah-copy-to-register-1'
+`xah-append-to-register-1'
+`xah-paste-from-register-1'
+`xah-clear-register-1'
+
 URL `http://xahlee.info/emacs/emacs/elisp_copy-paste_register_1.html'
 Created: 2012-07-17
-Version: 2025-11-05"
+Version: 2023-08-05"
   (interactive)
   (let (xbeg xend)
-    (setq xbeg (if (region-active-p) (region-beginning) (save-excursion (if (re-search-backward "\n[ \t]*\n" nil 1) (match-end 0) (point)))) xend (if (region-active-p) (region-end) (save-excursion (if (re-search-forward "\n[ \t]*\n" nil 1) (match-beginning 0) (point)))))
+    (if (region-active-p)
+         (setq xbeg (region-beginning) xend (region-end))
+      (setq xbeg (line-beginning-position) xend (line-end-position)))
     (copy-to-register ?1 xbeg xend)
-    (message "Copied to register 1: %s." (buffer-substring xbeg xend))))
+    (message "Copied to register 1: [%s]." (buffer-substring xbeg xend))))
 
 (defun xah-append-to-register-1 ()
-  "Append selection or text block to register 1,
-with one added newline char at end.
-URL `http://xahlee.info/emacs/emacs/elisp_copy-paste_register_1.html'
+  "Append current line or selection to register 1.
+When no selection, append current line, with newline char.
+
+See also:
+`xah-copy-to-register-1'
+`xah-append-to-register-1'
+`xah-paste-from-register-1'
+`xah-clear-register-1'
+
+URL `http://xahlee.info/emacs/emacs/emacs_copy_append.html'
 Created: 2015-12-08
-Version: 2025-11-07"
+Version: 2023-08-05"
   (interactive)
   (let (xbeg xend)
-    (setq xbeg (if (region-active-p) (region-beginning) (save-excursion (if (re-search-backward "\n[ \t]*\n" nil 1) (match-end 0) (point)))) xend (if (region-active-p) (region-end) (save-excursion (if (re-search-forward "\n[ \t]*\n" nil 1) (match-beginning 0) (point)))))
-    (let ((register-separator "\n"))
-      (append-to-register ?1 xbeg xend)
-      (message "Done. Append to register 1."))))
+    (if (region-active-p)
+         (setq xbeg (region-beginning) xend (region-end))
+      (setq xbeg (line-beginning-position) xend (line-end-position)))
+    (append-to-register ?1 xbeg xend)
+    (with-temp-buffer (insert "\n")
+                      (append-to-register ?1 (point-min) (point-max)))
+    (message "Appended to register 1: [%s]." (buffer-substring xbeg xend))))
 
 (defun xah-paste-from-register-1 ()
   "Paste text from register 1.
+
+See also:
+`xah-copy-to-register-1'
+`xah-append-to-register-1'
+`xah-paste-from-register-1'
+`xah-clear-register-1'
+
 URL `http://xahlee.info/emacs/emacs/elisp_copy-paste_register_1.html'
 Created: 2015-12-08
-Version: 2025-11-07"
+Version: 2023-04-07"
   (interactive)
   (when (region-active-p)
     (delete-region (region-beginning) (region-end)))
@@ -1660,15 +1674,22 @@ Version: 2025-11-07"
 
 (defun xah-clear-register-1 ()
   "Clear register 1.
+
+See also:
+`xah-copy-to-register-1'
+`xah-append-to-register-1'
+`xah-paste-from-register-1'
+`xah-clear-register-1'
+
 URL `http://xahlee.info/emacs/emacs/elisp_copy-paste_register_1.html'
 Created: 2015-12-08
-Version: 2025-11-07"
+Version: 2023-04-07"
   (interactive)
   (progn
     (copy-to-register ?1 (point-min) (point-min))
     (message "Cleared register 1.")))
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
 ;; insertion commands
 
 (defun xah-insert-date ()
@@ -1679,37 +1700,39 @@ If there is selection, delete it first.
 
 URL `http://xahlee.info/emacs/emacs/elisp_insert-date-time.html'
 Created: 2013-05-10
-Version: 2026-02-04"
+Version: 2023-10-01"
   (interactive)
   (let (xmenu xstyle)
     (setq
      xmenu
-     (list
-      (concat "ISO date⚫" (format-time-string "%Y-%m-%d"))
-      (concat "dotted version⚫" (format-time-string "%Y.%m.%d"))
-      (concat "coder⚫" (format-time-string "%Y-%m-%d_%H%M%S"))
-      (concat "all digits⚫" (format-time-string "%Y%m%d%H%M%S"))
+     '(("Dia-Mês-Ano com zeros à esquerda /" . (format-time-string "%d/%m/%Y"))
+       ("Dia-Mês-Ano com zeros à esquerda /" . (format-time-string "%d-%m-%Y"))       
+       ("ISO date • 2018-04-12" . (format-time-string "%Y-%m-%d"))
+       ("all digits datetime • 20180412224611" . (format-time-string "%Y%m%d%H%M%S"))
+       ("date _ time digits • 2018-04-12_224611" . (format-time-string "%Y-%m-%d_%H%M%S"))
+       ("ISO datetime full • 2018-04-12T22:46:11-07:00" .
+        (concat
+         (format-time-string "%Y-%m-%dT%T")
+         ((lambda (xx) (format "%s:%s" (substring xx 0 3) (substring xx 3 5)))
+          (format-time-string "%z"))))
+       ("ISO datetime w space • 2018-04-12 22:46:11-07:00" .
+        (concat
+         (format-time-string "%Y-%m-%d %T")
+         ((lambda (xx) (format "%s:%s" (substring xx 0 3) (substring xx 3 5)))
+          (format-time-string "%z"))))
+       ("ISO date + weekday • 2018-04-12 Thursday" . (format-time-string "%Y-%m-%d %A"))
+       ("USA date + weekday • Thursday, April 12, 2018" . (format-time-string "%A, %B %d, %Y"))
+       ("USA date + weekday abbrev • Thu, Apr 12, 2018" . (format-time-string "%a, %b %d, %Y"))
+       ("USA date • April 12, 2018" . (format-time-string "%B %d, %Y"))
+       ("USA date abbrev • Apr 12, 2018" . (format-time-string "%b %d, %Y")))
 
-      (concat "unix seconds⚫"
-              ;; (number-to-string (car (let ((current-time-list nil)) (current-time))))
-              (number-to-string (time-convert (current-time) 'integer)))
-
-      ;; (concat "ISO full⚫" (format-time-string "%Y-%m-%dT%T") (funcall (lambda (xx) (format "%s:%s" (substring xx 0 3) (substring xx 3 5))) (format-time-string "%z")))
-
-      (concat "ISO full⚫" (format-time-string "%FT%T%z"))
-
-      (concat "ISO + weekday⚫" (format-time-string "%Y-%m-%d %A"))
-      (concat "USA + weekday⚫" (format-time-string "%A, %B %d, %Y"))
-      (concat "USA + weekday abbrev⚫" (format-time-string "%a, %b %d, %Y"))
-      (concat "USA⚫" (format-time-string "%B %d, %Y"))
-      (concat "USA abbrev⚫" (format-time-string "%b %d, %Y"))))
-    (setq xstyle
-          (if current-prefix-arg
-              (let ((completion-ignore-case t))
-                (completing-read "Style:" xmenu nil t))
-            (car xmenu)))
+     xstyle
+     (if current-prefix-arg
+         (let ((completion-ignore-case t))
+           (completing-read "Style:" xmenu nil t nil nil (caar xmenu)))
+       (caar xmenu)))
     (when (region-active-p) (delete-region (region-beginning) (region-end)))
-    (insert (nth 1 (split-string xstyle "⚫")))))
+    (insert (eval (cdr (assoc xstyle xmenu))))))
 
 (defun xah-insert-bracket-pair (LBracket RBracket &optional WrapMethod)
   "Insert brackets around selection, word, at point, and maybe move cursor in between.
@@ -1722,14 +1745,14 @@ Else
 • If WrapMethod is `block', wrap around block.
 Else
 • If cursor is at beginning of line and its not empty line and contain at least 1 space, wrap around the line.
-• If cursor is at end of a word or buffer, one of the following happens:
+• If cursor is at end of a word or buffer, one of the following will happen:
  xyz▮ → xyz(▮)
  xyz▮ → (xyz▮)       if in one of the lisp modes.
 • wrap brackets around word if any. e.g. xy▮z → (xyz▮). Or just (▮)
 
 URL `http://xahlee.info/emacs/emacs/elisp_insert_brackets_by_pair.html'
 Created: 2017-01-17
-Version: 2025-03-25"
+Version: 2024-03-19"
   (if (region-active-p)
       (progn
         (let ((xbeg (region-beginning)) (xend (region-end)))
@@ -1747,7 +1770,7 @@ Version: 2025-03-25"
         (goto-char (+ xend (length LBracket))))
        ((eq WrapMethod 'block)
         (save-excursion
-          (setq xbeg (if (region-active-p) (region-beginning) (save-excursion (if (re-search-backward "\n[ \t]*\n" nil 1) (match-end 0) (point)))) xend (if (region-active-p) (region-end) (save-excursion (if (re-search-forward "\n[ \t]*\n" nil 1) (match-beginning 0) (point)))))
+          (seq-setq (xbeg xend) (xah-fly-get-pos-block-or))
           (goto-char xend)
           (insert RBracket)
           (goto-char xbeg)
@@ -1817,20 +1840,41 @@ Version: 2025-03-25"
 (defun xah-insert-deco-angle-bracket❮❯ () (interactive) (xah-insert-bracket-pair "❮" "❯"))
 (defun xah-insert-deco-angle-fat-bracket❰❱ () (interactive) (xah-insert-bracket-pair "❰" "❱"))
 
+(defun xah-insert-hyphen ()
+  "Insert a HYPHEN-MINUS character."
+  (interactive)
+  (insert "-"))
+
+(defun xah-insert-low-line ()
+  "Insert a LOW LINE character."
+  (interactive)
+  (insert "_"))
+
+(defun xah-insert-string-assignment ()
+  "Insert =\"\""
+  (interactive)
+  (progn (insert "=\"\"")
+         (left-char)))
+
 (defun xah-insert-space-before ()
   "Insert space before cursor."
   (interactive)
   (insert " "))
 
+(defun xah-insert-space-after ()
+  "Insert space after cursor"
+  (interactive)
+  (insert " ")
+  (left-char))
+
 (defun xah-insert-seperator ()
-  "Insert a visual seperator line.
-Version: 2025-11-13"
+  "Insert a visual seperator line."
   (interactive)
   (cond
    ((and buffer-file-name (string-equal "html" (file-name-extension buffer-file-name))) (insert "<hr />\n"))
    ((not comment-start)
-    (insert "\ns------------------------------\n"))
-   (t (insert "\ns------------------------------\n")
+    (insert "\nHHHH---------------------------------------------------\n"))
+   (t (insert "\nHHHH---------------------------------------------------\n")
       (backward-char)
       (comment-line 1))))
 
@@ -1847,51 +1891,33 @@ xString can be multiple chars or any string.
  '(
    ;;
    ("smile beaming 😊" . "😊")
-   ("omg 😂" . "😂")
+   ("tears of joy" . "😂")
    ("hug 🤗" . "🤗")
    ("heart eyes 😍" . "😍")
    ("heart face 🥰" . "🥰")
    ("angry 😠" . "😠")
    ("vomit 🤮" . "🤮")
-   ("clown 🤡" . "🤡")
-   ("skull 💀" . "💀")
-
-   ("pig 🐷" . "🐷")
-   ("cow 🐮" . "🐮")
-   ("sun 🌞" . "🌞")
-   ("heart 🧡" . "🧡")
-
    ("thumb up 👍" . "👍")
    ("thumb down 👎" . "👎")
-
+   ("tv 📺" . "📺")
+   ("checkmark ✅" . "✅")
+   ("new 🆕" . "🆕")
    ("glowing star 🌟" . "🌟")
    ("star ⭐" . "⭐")
    ("sparkles ✨" . "✨")
-
-   ("tv 📺" . "📺")
-
-   ("lotus 🪷" . "🪷")
-   ("butterfly 🦋" . "🦋")
-   ("LADY bug BEETLE 🐞" . "🐞")
-
-   ("checkmark ✅" . "✅")
-   ("new 🆕" . "🆕")
    ("rocket 🚀" . "🚀")
+   ("sun 🌞" . "🌞")
+   ("heart 🧡" . "🧡")
+   ("clown 🤡" . "🤡")
    ("large circle" . "⭕")
    ("cross ❌" . "❌")
    ("red triangle 🔺" . "🔺")
    ("diamond 💠" . "💠")
    ("square ⬛" . "⬛")
-   ("SMALL ORANGE DIAMOND 🔸" . "🔸")
-   ("BLACK RIGHT-POINTING TRIANGLE ▶" . "▶")
-   ("BLACK DIAMOND ◆" . "◆")
-   ("LONG RIGHTWARDS ARROW ⟶" . "⟶")
-
    ("script 📜" . "📜")
    ("package 📦" . "📦")
    ("cursor ▮" . "▮")
    ("music 🎵" . "🎵")
-   ("ok 🆗" . "🆗")
 
    ("dagger †" . "†")
    ("double dagger ‡" . "‡")
@@ -1904,7 +1930,7 @@ xString can be multiple chars or any string.
    ("double angle quote" . "«»")
 
    ("bullet •" . "•")
-
+   ("diamond ◆" . "◆")
    ("...ellipsis …" . "…")
    ("nbsp non breaking space" . " ")
    ("chinese comma 、" . "、")
@@ -1931,24 +1957,25 @@ Version: 2023-09-19"
            (completing-read "Insert:" xah-unicode-list nil t))))
     (insert (cdr (assoc xkey xah-unicode-list)))))
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
 ;; text selection
 
 (defun xah-select-block ()
-  "Select the current/next block.
+  "Select the current/next block plus 1 blankline.
+If region is active, extend selection downward by block.
 
 URL `http://xahlee.info/emacs/emacs/emacs_select_text_block.html'
 Created: 2019-12-26
-Version: 2025-07-07"
+Version: 2023-11-14"
   (interactive)
   (if (region-active-p)
-      (re-search-forward "\n[ \t]*\n[ \t]*\n*" nil 1)
+      (re-search-forward "\n[ \t]*\n[ \t]*\n*" nil :move)
     (progn
-      (when (re-search-backward "\n[ \t]*\n" nil 1)
+      (skip-chars-forward " \n\t")
+      (when (re-search-backward "\n[ \t]*\n" nil :move)
         (goto-char (match-end 0)))
       (push-mark (point) t t)
-      (re-search-forward "\n[ \t]*\n" nil 1)
-      (skip-chars-backward " \t\n"))))
+      (re-search-forward "\n[ \t]*\n" nil :move))))
 
 (defun xah-select-line ()
   "Select current line. If region is active, extend selection downward by line.
@@ -1985,120 +2012,106 @@ when there is no selection,
 
 when there is a selection, the selection extension behavior is still experimental. But when cursor is on a any type of bracket (parenthesis, quote), it extends selection to outer bracket.
 
-After this command is called, press variable `xah-repeat-key' to repeat it.
-
 URL `http://xahlee.info/emacs/emacs/emacs_extend_selection.html'
 Created: 2020-02-04
-Version: 2025-11-18"
+Version: 2023-11-14"
   (interactive)
-  (if (region-active-p)
-      (let ((xbeg (region-beginning)) (xend (region-end)))
-        (goto-char xbeg)
-        (cond
-         ((looking-at "\\s(")
-          (if (eq (nth 0 (syntax-ppss)) 0)
-              (progn
-                (message "%s debug: left bracket, depth 0." real-this-command)
-                (end-of-line) ; select current line
-                (push-mark (line-beginning-position) t t))
+
+  (cond
+   ((region-active-p)
+    (let ((xbeg (region-beginning)) (xend (region-end)))
+      (goto-char xbeg)
+      (cond
+       ((looking-at "\\s(")
+        (if (eq (nth 0 (syntax-ppss)) 0)
             (progn
-              (message "%s debug: left bracket, depth not 0" real-this-command)
-              (up-list -1 t t)
-              (mark-sexp) (exchange-point-and-mark))))
-         ((eq xbeg (line-beginning-position))
+              ;; (message "debug: left bracket, depth 0.")
+              (end-of-line) ; select current line
+              (push-mark (line-beginning-position) t t))
           (progn
-            (goto-char xbeg)
-            (let ((xfirstLineEndPos (line-end-position)))
-              (cond
-               ((eq xend xfirstLineEndPos)
-                (progn
-                  (message "%s debug: exactly 1 line. extend to next whole line." real-this-command)
-                  (forward-line 1)
-                  (end-of-line)))
-               ((< xend xfirstLineEndPos)
-                (progn
-                  (message "%s debug: less than 1 line. complete the line." real-this-command)
-                  (end-of-line)))
-               ((> xend xfirstLineEndPos)
-                (progn
-                  (message "%s debug: beginning of line, but end is greater than 1st end of line" real-this-command)
-                  (goto-char xend)
-                  (if (eq (point) (line-end-position))
-                      (progn
-                        (message "%s debug: exactly multiple lines" real-this-command)
-                        (forward-line 1)
-                        (end-of-line))
-                    (progn
-                      (message "%s debug: multiple lines but end is not eol. make it so" real-this-command)
-                      (goto-char xend)
-                      (end-of-line)))))
-               (t (error "%s: logic error 42946" real-this-command))))))
-         ((and (> (point) (line-beginning-position)) (<= (point) (line-end-position)))
-          (progn
-            (message "%s debug: less than 1 line" real-this-command)
-            (end-of-line) ; select current line
-            (push-mark (line-beginning-position) t t)))
-         (t
-          (message "%s debug: last resort" real-this-command)
-          nil)))
-    (cond
-     ((looking-at "\\s(")
-      (message "%s debug: left bracket" real-this-command)
-      (mark-sexp) (exchange-point-and-mark))
-
-     ;; ((looking-at "\\s)")
-     ;; (message "%s debug: right bracket" real-this-command)
-     ;; (backward-up-list) (mark-sexp) (exchange-point-and-mark))
-
-     ((looking-at "\\s\"")
-      (message "%s debug: string quote" real-this-command)
-
-      (if (nth 3 (syntax-ppss))
-          (progn
-            (forward-char)
-            (backward-sexp)
-            (mark-sexp)
-            (exchange-point-and-mark))
+            ;; (message "debug: left bracket, depth not 0")
+            (up-list -1 t t)
+            (mark-sexp))))
+       ((eq xbeg (line-beginning-position))
         (progn
-          (mark-sexp)
-          (exchange-point-and-mark))))
+          (goto-char xbeg)
+          (let ((xfirstLineEndPos (line-end-position)))
+            (cond
+             ((eq xend xfirstLineEndPos)
+              (progn
+                ;; (message "debug: exactly 1 line. extend to next whole line." )
+                (forward-line 1)
+                (end-of-line)))
+             ((< xend xfirstLineEndPos)
+              (progn
+                ;; (message "debug: less than 1 line. complete the line." )
+                (end-of-line)))
+             ((> xend xfirstLineEndPos)
+              (progn
+                ;; (message "debug: beginning of line, but end is greater than 1st end of line" )
+                (goto-char xend)
+                (if (eq (point) (line-end-position))
+                    (progn
+                      ;; (message "debug: exactly multiple lines" )
+                      (forward-line 1)
+                      (end-of-line))
+                  (progn
+                    ;; (message "debug: multiple lines but end is not eol. make it so" )
+                    (goto-char xend)
+                    (end-of-line)))))
+             (t (error "%s: logic error 42946" real-this-command))))))
+       ((and (> (point) (line-beginning-position)) (<= (point) (line-end-position)))
+        (progn
+          ;; (message "debug: less than 1 line" )
+          (end-of-line) ; select current line
+          (push-mark (line-beginning-position) t t)))
+       (t
+        ;; (message "debug: last resort" )
+        nil))))
 
-     ((looking-at "[ \t\n]")
-      (message "%s debug: is white space" real-this-command)
-      ;; (skip-chars-backward " \t\n")
-      (push-mark)
-      (skip-chars-forward " \t\n")
-      (setq mark-active t))
+   ((looking-at "\\s(")
+    ;; (message "debug: left bracket")
+    (mark-sexp))
 
-     ((looking-at "[-_[:word:]]")
-      (message "%s debug: right is word or symbol" real-this-command)
-      (skip-chars-backward "-_[:word:]")
-      (push-mark)
-      (skip-chars-forward "-_[:word:]")
-      (setq mark-active t))
+   ((looking-at "\\s)")
+    ;; (message "debug: right bracket")
+    (backward-up-list) (mark-sexp))
 
-     ;; ((and (looking-at "[:blank:]")
-     ;;       (prog2 (backward-char) (looking-at "[[:blank:]]") (forward-char)))
-     ;;  ;; (message "%s debug: left and right both space" real-this-command)
-     ;;  (skip-chars-backward "[:blank:]") (push-mark (point) t t)
-     ;;  (skip-chars-forward "[:blank:]"))
+   ((looking-at "\\s\"")
+    ;; (message "debug: string quote")
+    (mark-sexp))
 
-     ((and (looking-at "\n")
-           (eq (char-before) 10))
-      (message "%s debug: left and right both newline" real-this-command)
-      (skip-chars-forward "\n")
-      (push-mark (point) t t)
-      (re-search-forward "\n[ \t]*\n"))
+   ((looking-at "[ \t\n]")
+    ;; (message "debug: is white space")
+    (skip-chars-backward " \t\n")
+    (push-mark)
+    (skip-chars-forward " \t\n")
+    (setq mark-active t))
 
-     (t
-      (message "%s debug: no condition met. just select 1 char" real-this-command)
-      (push-mark (point) t t)
-      (forward-char))))
+   ((looking-at "[-_a-zA-Z0-9]")
+    ;; (message "debug: left is word or symbol")
+    (skip-chars-backward "-_a-zA-Z0-9")
+    (push-mark)
+    (skip-chars-forward "-_a-zA-Z0-9")
+    (setq mark-active t))
 
-  (set-transient-map
-   (let ((xkmap (make-sparse-keymap)))
-     (define-key xkmap (kbd (if (boundp 'xah-repeat-key) xah-repeat-key ".")) real-this-command)
-     xkmap)))
+   ((and (looking-at "[:blank:]")
+         (prog2 (backward-char) (looking-at "[:blank:]") (forward-char)))
+    ;; (message "debug: left and right both space" )
+    (skip-chars-backward "[:blank:]") (push-mark (point) t t)
+    (skip-chars-forward "[:blank:]"))
+
+   ((and (looking-at "\n")
+         (eq (char-before) 10))
+    ;; (message "debug: left and right both newline")
+    (skip-chars-forward "\n")
+    (push-mark (point)  t t)
+    (re-search-forward "\n[ \t]*\n"))
+
+   (t
+    ;; (message "debug: just mark sexp" )
+    (mark-sexp)
+    (exchange-point-and-mark))))
 
 (defun xah-select-text-in-quote ()
   "Select text between the nearest left and right delimiters.
@@ -2131,50 +2144,110 @@ Version: 2024-10-02"
     (setq xend (point))
     (kill-region xbeg xend)))
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
 ;; misc
+
+(defvar xah-fly-switch-buffer-map nil "repeat key map for `xah-next-user-buffer' etc.")
+(setq xah-fly-switch-buffer-map
+      (let ((xkmap (make-sparse-keymap)))
+        (define-key xkmap (kbd "<up>") 'xah-previous-emacs-buffer)
+        (define-key xkmap (kbd "<down>") 'xah-next-emacs-buffer)
+        (define-key xkmap (kbd "<left>") 'xah-previous-user-buffer)
+        (define-key xkmap (kbd "<right>") 'xah-next-user-buffer)
+        xkmap))
 
 (defun xah-user-buffer-p ()
   "Return t if current buffer is a user buffer, else nil.
 A user buffer has buffer name NOT starts with * or space, and is not dired mode, help mode, etc.
 This function is used by buffer switching command and close buffer command, so that next buffer shown is a user buffer.
 You can override this function to get your idea of “user buffer”.
-URL `http://xahlee.info/emacs/emacs/elisp_next_prev_user_buffer.html'
 Created: 2016-06-18
 Version: 2024-09-23"
   (interactive)
   (cond
    ((string-match "^\*" (buffer-name)) nil)
-   ;; ((eq major-mode 'dired-mode) nil)
-   ;; ((eq major-mode 'eww-mode) nil)
-   ;; ((eq major-mode 'help-mode) nil)
+   ((eq major-mode 'dired-mode) nil)
+   ((eq major-mode 'eww-mode) nil)
+   ((eq major-mode 'help-mode) nil)
    (t t)))
 
 (defun xah-next-user-buffer ()
   "Switch to the next user buffer.
 User Buffer here is determined by `xah-user-buffer-p'.
+
+Press left or right arrow key to switch to prev next user.
+Press up or down arrow to switch to prev next emacs buffer.
+Any other key to exit.
+
 URL `http://xahlee.info/emacs/emacs/elisp_next_prev_user_buffer.html'
 Created: 2016-06-19
-Version: 2025-09-08"
+Version: 2024-09-23"
   (interactive)
-  (seq-some
-   (lambda (_)
-     (next-buffer)
-     (xah-user-buffer-p))
-   (make-list 50 0)))
+  (next-buffer)
+  (let ((i 0))
+    (while (< i 30)
+      (if (not (xah-user-buffer-p))
+          (progn (next-buffer)
+                 (setq i (1+ i)))
+        (progn (setq i 100)))))
+  (set-transient-map xah-fly-switch-buffer-map))
 
 (defun xah-previous-user-buffer ()
   "Switch to the previous user buffer.
 User Buffer here is determined by `xah-user-buffer-p'.
+
+Press left or right arrow key to switch to prev next user.
+Press up or down arrow to switch to prev next emacs buffer.
+Any other key to exit.
+
 URL `http://xahlee.info/emacs/emacs/elisp_next_prev_user_buffer.html'
 Created: 2016-06-19
-Version: 2025-09-08"
+Version: 2024-05-01"
   (interactive)
-  (seq-some
-   (lambda (_)
-     (previous-buffer)
-     (xah-user-buffer-p))
-   (make-list 50 0)))
+  (previous-buffer)
+  (let ((i 0))
+    (while (< i 29)
+      (if (not (xah-user-buffer-p))
+          (progn (previous-buffer)
+                 (setq i (1+ i)))
+        (progn (setq i 100)))))
+  (set-transient-map xah-fly-switch-buffer-map))
+
+(defun xah-next-emacs-buffer ()
+  "Switch to the next emacs buffer.
+Emacs buffer here means `xah-user-buffer-p' return nil.
+
+Press left or right arrow key to switch to prev next user.
+Press up or down arrow to switch to prev next emacs buffer.
+Any other key to exit.
+
+URL `http://xahlee.info/emacs/emacs/elisp_next_prev_user_buffer.html'
+Created: 2013-05-22
+Version: 2024-09-16"
+  (interactive)
+  (next-buffer)
+  (let ((i 0))
+    (while (and (xah-user-buffer-p) (< i 20))
+      (setq i (1+ i)) (next-buffer)))
+  (set-transient-map xah-fly-switch-buffer-map))
+
+(defun xah-previous-emacs-buffer ()
+  "Switch to the previous emacs buffer.
+Emacs buffer here means `xah-user-buffer-p' return nil.
+
+Press left or right arrow key to switch to prev next user.
+Press up or down arrow to switch to prev next emacs buffer.
+Any other key to exit.
+
+URL `http://xahlee.info/emacs/emacs/elisp_next_prev_user_buffer.html'
+Created: 2013-05-22
+Version: 2024-09-16"
+  (interactive)
+  (previous-buffer)
+  (let ((i 0))
+    (while (and (xah-user-buffer-p) (< i 20))
+      (setq i (1+ i)) (previous-buffer)))
+  (set-transient-map xah-fly-switch-buffer-map))
 
 (defun xah-new-empty-buffer ()
   "Create a new empty buffer.
@@ -2197,7 +2270,7 @@ Version: 2022-04-05"
 (declare-function minibuffer-keyboard-quit "delsel" ())
 (declare-function org-edit-src-save "org-src" ())
 
-(defcustom xah-recently-closed-buffers-max 100 "The maximum length for `xah-recently-closed-buffers'."
+(defcustom xah-recently-closed-buffers-max 40 "The maximum length for `xah-recently-closed-buffers'."
   :type 'integer)
 
 (defvar xah-recently-closed-buffers nil "A Alist of recently closed buffers.
@@ -2206,12 +2279,11 @@ The max number to track is controlled by the variable `xah-recently-closed-buffe
 
 (defun xah-add-to-recently-closed (&optional BufferName BufferFileName)
   "Add to `xah-recently-closed-buffers'.
-Created: 2023-03-02
-Version: 2025-06-05"
-  (let ((bufname (if BufferName BufferName (buffer-name)))
-        (fpath (if BufferFileName BufferFileName buffer-file-name)))
-    (setq xah-recently-closed-buffers (cons (cons bufname fpath) xah-recently-closed-buffers)))
-  (when (length> xah-recently-closed-buffers xah-recently-closed-buffers-max)
+Version: 2023-03-02"
+  (let ((xbn (if BufferName BufferName (buffer-name)))
+        (xbfn (if BufferFileName BufferFileName buffer-file-name)))
+    (setq xah-recently-closed-buffers (cons (cons xbn xbfn) xah-recently-closed-buffers)))
+  (when (> (length xah-recently-closed-buffers) xah-recently-closed-buffers-max)
     (setq xah-recently-closed-buffers (butlast xah-recently-closed-buffers 1))))
 
 (defvar xah-create-buffer-backup nil "If true, `xah-close-current-buffer' creates a backup file when closing non-file buffer. Version: 2024-11-09")
@@ -2221,6 +2293,7 @@ Version: 2025-06-05"
 (defvar xah-temp-dir-path nil "Path to temp dir used by xah commands.
 by default, the value is dir named temp at `user-emacs-directory'.
 Version: 2023-03-21")
+
 (setq xah-temp-dir-path (concat user-emacs-directory "temp/"))
 
 (defun xah-close-current-buffer ()
@@ -2235,7 +2308,7 @@ If the buffer is a file, add the path to the list `xah-recently-closed-buffers'.
 
 URL `http://xahlee.info/emacs/emacs/elisp_close_buffer_open_last_closed.html'
 Created: 2016-06-19
-Version: 2025-09-08"
+Version: 2024-11-09"
   (interactive)
   (widen)
   (cond
@@ -2257,7 +2330,7 @@ Version: 2025-09-08"
    ((and xah-create-buffer-backup (not buffer-file-name) (xah-user-buffer-p) (not (eq (point-max) 1)))
     (let ((xnewName (format "%suntitled_%s_%x.txt"
                             xah-temp-dir-path
-                            (format-time-string "%Y-%m-%d_%H%M%S")
+                            (format-time-string "%Y%m%d_%H%M%S")
                             (random #xfffff))))
       (when (not (file-exists-p xah-temp-dir-path)) (make-directory xah-temp-dir-path))
       (write-region (point-min) (point-max) xnewName)
@@ -2271,7 +2344,7 @@ URL `http://xahlee.info/emacs/emacs/elisp_close_buffer_open_last_closed.html'
 Created: 2016-06-19
 Version: 2022-03-22"
   (interactive)
-  (if (length> xah-recently-closed-buffers 0)
+  (if (> (length xah-recently-closed-buffers) 0)
       (find-file (cdr (pop xah-recently-closed-buffers)))
     (progn (message "No recently close buffer in this session."))))
 
@@ -2341,7 +2414,7 @@ Version: 2024-09-25"
                      (setq xend (point))
                      (goto-char xp0)
                      (buffer-substring-no-properties xbeg xend))))
-    (setq xinput2 (if (length> xah-open-file-at-cursor-pre-hook 0)
+    (setq xinput2 (if (> (length xah-open-file-at-cursor-pre-hook) 0)
                       (let ((xprehook (run-hook-with-args-until-success 'xah-open-file-at-cursor-pre-hook xinput)))
                         (if xprehook xprehook xinput))
                     xinput))
@@ -2399,7 +2472,61 @@ Version: 2024-09-25"
               (message "File does not exist. Created at\n%s" xpathNoQ)
               (find-file xpathNoQ))))))))
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
+
+(defvar xah-run-current-file-dispatch nil
+"A dispatch table used by `xah-run-current-file' to call dedicated function to run code.
+Value is a association list.
+Each item is (EXT . FUNCTION).
+EXT is filename extension (sans the dot), type string.
+FUNCTION is a elisp function name to call, type symbol.
+If file extension match, and FUNCTION is defined, call it, pass current buffer's filepath as arg.
+Else, `xah-run-current-file-map' is looked up." )
+
+(setq xah-run-current-file-dispatch
+      '(("el" . load)
+        ("elc" . load)
+        ("java" . xah-java-compile-and-run)))
+
+(defvar xah-run-current-file-map
+  "A association list that maps file extension to a command for running the file, used by `xah-run-current-file'.
+Each item is (EXT . PROGRAM).
+EXT is filename extension (sans the dot), type string.
+PROGRAM is program name or path, with command options to run a file, type string.
+A filename is appended after the PROGRAM string as external command to call.")
+
+(setq xah-run-current-file-map
+      '(
+        ;; following are tested as of 2024-12-20
+
+        ("fs" . "dotnet fsi")
+        ("fsx" . "dotnet fsi")
+        ("go" . "go run")
+        ("js" . "deno run")
+        ("php" . "php")
+        ("pl" . "perl")
+        ("ps1" . "pwsh")
+        ("py" . "python")
+        ("py2" . "python2")
+        ("py3" . "python3")
+        ("rb" . "ruby")
+        ("ts" . "deno run")
+        ("m" . "wolframscript -print all -file")
+        ("wl" . "wolframscript -print all -file")
+        ("wls" . "wolframscript -print all -file")
+
+        ;; following may be outdated
+
+        ("clj" . "clj")
+        ("hs" . "runhaskell")
+        ("latex" . "pdflatex")
+        ("ml" . "ocaml")
+        ("rkt" . "racket")
+        ("sh" . "bash")
+        ("tex" . "pdflatex")
+        ("tsx" . "tsc")
+        ("vbs" . "cscript")
+        ("pov" . "povray +R2 +A0.1 +J1.2 +Am2 +Q9 +H480 +W640")))
 
 (defun xah-java-compile-and-run (Filename)
   "Compile and run java of current buffer.
@@ -2410,7 +2537,6 @@ requires the commands 「javac」 and 「java」.
 
 If compile fails, the error is displayed in a buffer.
 
-URL `http://xahlee.info/emacs/emacs/elisp_run_current_file.html'
 Created: 2024-12-20
 Version: 2024-12-20"
   (interactive (if buffer-file-name (progn (when (buffer-modified-p) (save-buffer)) (list buffer-file-name)) (user-error "Buffer is not file. Save it first.")))
@@ -2420,63 +2546,10 @@ Version: 2024-12-20"
     (call-process "javac" nil xjavac-buf nil Filename)
     (if (eq 1 (with-current-buffer xjavac-buf (point-max)))
         (progn
-          (with-current-buffer xoutbuf (erase-buffer))
+          (save-current-buffer (set-buffer xoutbuf) (erase-buffer))
           (call-process "java" nil xoutbuf nil (file-name-nondirectory (file-name-sans-extension Filename)))
           (display-buffer xoutbuf))
       (display-buffer xjavac-buf))))
-
-(defvar xah-run-current-file-dispatch
-  (list (cons "el" 'load)
-        (cons "elc" 'load)
-        (cons "java" 'xah-java-compile-and-run))
-  "A dispatch table used by `xah-run-current-file' to call dedicated function to run code.
-Value is a association list.
-Each item is (EXT . FUNCTION).
-EXT is filename extension (sans the dot), of type string.
-FUNCTION is a elisp function name to call, of type symbol.
-If file extension match, and FUNCTION is defined, call it, pass current buffer's filepath as arg.
-Else, `xah-run-current-file-map' is looked up.
-URL `http://xahlee.info/emacs/emacs/elisp_run_current_file.html'
-")
-
-(defvar xah-run-current-file-map
-  '(
-    ;; following are tested as of 2024-12-20
-    ("fs" . "dotnet fsi")
-    ("fsx" . "dotnet fsi")
-    ("go" . "go run")
-    ("js" . "deno run")
-    ("php" . "php")
-    ("pl" . "perl")
-    ("ps1" . "pwsh")
-    ("py" . "python")
-    ("py2" . "python2")
-    ("py3" . "python3")
-    ("rb" . "ruby")
-    ("ts" . "deno run")
-    ("m" . "wolframscript -print all -file")
-    ("wl" . "wolframscript -print all -file")
-    ("wls" . "wolframscript -print all -file")
-
-    ;; following may be outdated
-
-    ("clj" . "clj")
-    ("hs" . "runhaskell")
-    ("latex" . "pdflatex")
-    ("ml" . "ocaml")
-    ("rkt" . "racket")
-    ("sh" . "bash")
-    ("tex" . "pdflatex")
-    ("tsx" . "tsc")
-    ("vbs" . "cscript")
-    ("pov" . "povray +R2 +A0.1 +J1.2 +Am2 +Q9 +H480 +W640"))
-  "A association list that maps file extension to a command for running the file, used by `xah-run-current-file'.
-Each item is (EXT . PROGRAM).
-EXT is filename extension (sans the dot), type string.
-PROGRAM is program name or path, with command options to run a file, type string.
-A filename is appended after the PROGRAM string as external command to call.
-URL `http://xahlee.info/emacs/emacs/elisp_run_current_file.html'
-")
 
 (defun xah-run-current-file (Filename)
   "Execute the current file.
@@ -2490,7 +2563,7 @@ The variable `xah-run-current-file-dispatch' allows you to customize this comman
 
 URL `http://xahlee.info/emacs/emacs/elisp_run_current_file.html'
 Created: 2020-09-24
-Version: 2025-08-07"
+Version: 2024-12-25"
   (interactive (if buffer-file-name (progn (when (buffer-modified-p) (save-buffer)) (list buffer-file-name)) (user-error "Buffer is not file. Save it first.")))
   (let ((xoutbuf (get-buffer-create "*xah-run output*" t))
         (xext (file-name-extension Filename))
@@ -2499,19 +2572,15 @@ Version: 2025-08-07"
     (if xdispatch
         (if (fboundp (cdr xdispatch))
             (progn
-              (message "%s dispatch call %s" real-this-command xdispatch)
+              (message "calling %s" (cdr xdispatch))
               (funcall (cdr xdispatch) Filename))
           (warn "`xah-run-current-file' found function %s in xah-run-current-file-dispatch but it is unbound. Normal run continues using `xah-run-current-file-map'." xdispatch))
       (let ((xappCmdStr (cdr (assoc xext xah-run-current-file-map))))
         (when (not xappCmdStr) (error "%s: Unknown file extension: %s. check `xah-run-current-file-map'" real-this-command xext))
         (progn
-          (with-current-buffer xoutbuf (erase-buffer))
+          (save-current-buffer (set-buffer xoutbuf) (erase-buffer))
           (apply 'start-process (append (list "xah-run" xoutbuf) (split-string xappCmdStr " +" t) (list Filename) nil))
-          (display-buffer xoutbuf)
-          ;; (pop-to-buffer xoutbuf)
-          ;; (with-current-buffer xoutbuf (goto-char (point-min)))
-          ))))
-  (message "done. %s" real-this-command))
+          (display-buffer xoutbuf))))))
 
 (defun xah-clean-empty-lines ()
   "Replace repeated blank lines to just 1, in whole buffer or selection.
@@ -2530,38 +2599,32 @@ Version: 2020-09-08"
         (narrow-to-region xbegin xend)
         (progn
           (goto-char (point-min))
-          (while (re-search-forward "\n\n\n+" nil 1)
+          (while (re-search-forward "\n\n\n+" nil :move)
             (replace-match "\n\n")))))))
 
-(defun xah-clean-whitespace (&optional Begin End)
+(defun xah-clean-whitespace ()
   "Delete trailing whitespace, and replace repeated blank lines to just 1.
 Only space and tab is considered whitespace here.
 Works on whole buffer or selection, respects `narrow-to-region'.
 
 URL `http://xahlee.info/emacs/emacs/elisp_compact_empty_lines.html'
 Created: 2017-09-22
-Version: 2025-05-04"
+Version: 2022-08-06"
   (interactive)
-  (let (xbeg xend)
-    (seq-setq (xbeg xend)
-              (if (and Begin End)
-                  (list Begin End)
-                (if (region-active-p)
-                    (list (region-beginning) (region-end))
-                  (list (point-min) (point-max)))))
+  (let (xbegin xend)
+    (if (region-active-p)
+        (setq xbegin (region-beginning) xend (region-end))
+      (setq xbegin (point-min) xend (point-max)))
     (save-excursion
       (save-restriction
-        (narrow-to-region xbeg xend)
-        (progn
-          (goto-char (point-min))
-          (while (re-search-forward "[ \t]+\n" nil t) (replace-match "\n")))
-        (progn
-          (goto-char (point-min))
-          (while (re-search-forward "\n\n\n+" nil t) (replace-match "\n\n")))
-        (progn
-          (goto-char (point-max))
-          (while (eq (char-before) 32) (delete-char -1))))))
-  (message "done xah-clean-whitespace"))
+        (narrow-to-region xbegin xend)
+        (goto-char (point-min))
+        (while (re-search-forward "[ \t]+\n" nil :move) (replace-match "\n"))
+        (goto-char (point-min))
+        (while (re-search-forward "\n\n\n+" nil :move) (replace-match "\n\n"))
+        (goto-char (point-max))
+        (while (eq (char-before) 32) (delete-char -1)))))
+  (message "%s done" real-this-command))
 
 (defun xah-make-backup ()
   "Make a backup copy of current file or dired marked files.
@@ -2575,13 +2638,15 @@ If the current buffer is not associated with a file, do nothing.
 
 URL `http://xahlee.info/emacs/emacs/elisp_make-backup.html'
 Created: 2018-06-06
-Version: 2025-07-22"
+Version: 2024-10-21"
   (interactive)
-  (let ((xtimestamp (format-time-string "%Y%m%d%H%M%S")))
-    (if buffer-file-name
-        (let ((xbackupName (concat buffer-file-name "." xtimestamp "~")))
-          (copy-file buffer-file-name xbackupName t)
-          (message "\nBackup saved at: %s" xbackupName))
+  (let ((xfname buffer-file-name)
+        (xtimestamp (format-time-string "%Y%m%d%H%M%S")))
+    (if xfname
+        (let ((xbackupName
+               (concat xfname "." xtimestamp "~")))
+          (copy-file xfname xbackupName t)
+          (message (concat "\nBackup saved at: " xbackupName)))
       (if (eq major-mode 'dired-mode)
           (progn
             (mapc (lambda (xx)
@@ -2590,7 +2655,7 @@ Version: 2025-07-22"
                       (copy-file xx xbackupName t)))
                   (dired-get-marked-files))
             (revert-buffer))
-        (user-error "xah-make-backup: buffer not file nor dired")))))
+        (user-error "%s: buffer not file nor dired" real-this-command)))))
 
 (defun xah-make-backup-and-save ()
   "Backup of current file and save, or backup dired marked files.
@@ -2598,15 +2663,11 @@ For detail, see `xah-make-backup'.
 If the current buffer is not associated with a file nor dired, nothing's done.
 
 URL `http://xahlee.info/emacs/emacs/elisp_make-backup.html'
-Created: 2015-10-14
-Version: 2025-09-26"
+Version: 2015-10-14"
   (interactive)
   (if buffer-file-name
       (progn
-        (let ((xtimestamp (format-time-string "%Y%m%d%H%M%S")))
-          (let ((xbackupName (concat buffer-file-name "." xtimestamp "~")))
-            (copy-file buffer-file-name xbackupName t)
-            (message "\nBackup saved at: %s" xbackupName)))
+        (xah-make-backup)
         (when (buffer-modified-p)
           (save-buffer)))
     (progn
@@ -2653,15 +2714,14 @@ Call `xah-open-last-closed' to open." xbackupPath)
         (message "non-file buffer killed. buffer text copied to `kill-ring'."))))
   (when (eq major-mode 'dired-mode) (revert-buffer)))
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
 
 (defun xah-search-current-word ()
   "Call `isearch' on current word or selection.
 “word” here is A to Z, a to z, and hyphen [-] and lowline [_], independent of syntax table.
 
-URL `http://xahlee.info/emacs/emacs/emacs_search_current_word.html'
-Created: 2010-05-29
-Version: 2026-01-06"
+URL `http://xahlee.info/emacs/emacs/modernization_isearch.html'
+Version: 2015-04-09"
   (interactive)
   (let (xbeg xend)
     (if (region-active-p)
@@ -2669,26 +2729,14 @@ Version: 2026-01-06"
       (save-excursion
         (skip-chars-backward "-_A-Za-z0-9")
         (setq xbeg (point))
-        (forward-char)
+        (right-char)
         (skip-chars-forward "-_A-Za-z0-9")
         (setq xend (point))))
-    (deactivate-mark)
-    (when (< xbeg (point)) (goto-char xbeg))
+    (setq mark-active nil)
+    (when (< xbeg (point))
+      (goto-char xbeg))
     (isearch-mode t)
     (isearch-yank-string (buffer-substring-no-properties xbeg xend))))
-
-(defun xah-fly-cancel ()
-  "Cancle selection or call `minibuffer-keyboard-quit' and `keyboard-quit'.
-This command is intended to replace key C-g , but not always work. Sometimes you still need to press C-g to cancel or abort or exit some commands.
-
-Created: 2025-08-01
-Version: 2025-08-03"
-  (interactive)
-  (if (minibufferp (current-buffer))
-      (progn (minibuffer-keyboard-quit))
-    (if (region-active-p)
-        (progn (deactivate-mark))
-      (progn (keyboard-quit)))))
 
 (declare-function w32-shell-execute "w32fns.c" (operation document &optional parameters show-flag)) ; (w32-shell-execute "open" default-directory)
 
@@ -2750,7 +2798,7 @@ When called in emacs lisp, if Fname is given, open that.
 
 URL `http://xahlee.info/emacs/emacs/emacs_dired_open_file_in_ext_apps.html'
 Created: 2019-11-04
-Version: 2025-04-18"
+Version: 2023-06-26"
   (interactive)
   (let (xfileList xdoIt)
     (setq xfileList
@@ -2759,15 +2807,16 @@ Version: 2025-04-18"
             (if (eq major-mode 'dired-mode)
                 (dired-get-marked-files)
               (list buffer-file-name))))
-    (setq xdoIt (if (length< xfileList 10) t (y-or-n-p "Open more than 10 files? ")))
+    (setq xdoIt (if (<= (length xfileList) 10) t (y-or-n-p "Open more than 10 files? ")))
     (when xdoIt
       (cond
        ((eq system-type 'windows-nt)
-        (let ((xoutbuf (get-buffer-create "*xah open in external app*"))
+        (let ((xoutBuf (get-buffer-create "*xah open in external app*"))
               (xcmdlist (list "PowerShell" "-Command" "Invoke-Item" "-LiteralPath")))
           (mapc
            (lambda (x)
-             (apply 'start-process (append (list "xah open in external app" xoutbuf) xcmdlist (list (format "'%s'" (string-replace "'" "`'" x))) nil)))
+             (message "%s" x)
+             (apply 'start-process (append (list "xah open in external app" xoutBuf) xcmdlist (list (format "'%s'" (if (string-match "'" x) (replace-match "`'" t t x) x))) nil)))
            xfileList)))
        ((eq system-type 'darwin)
         (mapc (lambda (xfpath) (shell-command (concat "open " (shell-quote-argument xfpath)))) xfileList))
@@ -2833,7 +2882,7 @@ Version: 2017-01-29"
       (other-frame 1)
     (delete-other-windows)))
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
 ;; layout lookup tables for key conversion
 
 (defvar xah-fly-layout-diagrams (make-hash-table :test 'equal)
@@ -2993,17 +3042,18 @@ A S T F G H J E L : \"
 Z X C V B N M < > ?
 " xah-fly-layout-diagrams)
 
-(puthash "neo2" "
-ˇ ° § ℓ » « $ € „ “ ” — ¸
-^ 1 2 3 4 5 6 7 8 9 0 - `
+  ;; todo. need fix
+  (puthash "neo2" "
+^ ! @ # $ % ^ & * ( ) { }
+` 1 2 3 4 5 6 7 8 9 0 - ]
 
-x v l c w k h g f q ß ´ \\
+x v l c w k h g f q ß = \\
 u i a e o s n r t d y
 ü ö ä p z b m , . j
 
-X V L C W K H G F Q ẞ ~ |
+X V L C W K H G F Q ? + |
 U I A E O S N R T D Y
-Ü Ö Ä P Z B M – • J
+Ü Ö Ä P Z B M , . J
 " xah-fly-layout-diagrams)
 
   (puthash "norman" "
@@ -3042,6 +3092,19 @@ i e a o u m d s r n ´
 
 ? ; : H X W L T C P ^ _ |
 I E A O U M D S R N `
+ Ç J B K Q V G F Z
+" xah-fly-layout-diagrams)
+
+  (puthash "gabriel" "
++ ! @ # $ % ¨ & * ( ) { -
+= 1 2 3 4 5 6 7 8 9 0 [ -
+
+/ , . h x w l t c p ´ - \\
+i e a o u m d s r n ~
+y ç j b k q v g f z
+
+? < > H X W L T C P ` _ ]
+I E A O U M D S R N ^
 Y Ç J B K Q V G F Z
 " xah-fly-layout-diagrams)
 
@@ -3203,7 +3266,7 @@ shift → ctrl
 If the keys in layouts are the same, it's not in the table.
 
 Created: 2024-04-19
-Version: 2025-06-05"
+Version: 2024-04-23"
   (let (xkeys1 xkeys2 (xtable (make-hash-table :test 'equal)))
     (setq xkeys1 (split-string Layout1 "[ \n]+" t))
     (setq xkeys2 (split-string Layout2 "[ \n]+" t))
@@ -3215,7 +3278,8 @@ Version: 2025-06-05"
            nil
          (puthash x y xtable)))
      xkeys1 xkeys2)
-    xtable))
+    xtable
+    ))
 
 ;; (xah-fly-create-key-conv-table
 ;;   (gethash "qwerty" xah-fly-layout-diagrams)
@@ -3232,10 +3296,10 @@ Version: 2022-10-22")
 (if xah-fly-key-current-layout nil (setq xah-fly-key-current-layout "qwerty"))
 
 (defvar xah-fly--key-convert-table nil
-  "A hashtable that's the conversion table from dvorak to current layout.
+  "A alist that's the conversion table from dvorak to current layout.
 Value is a hashtable.
 Created: 2019-02-12
-Version: 2025-07-11" )
+Version: 2024-04-22" )
 
 (setq
  xah-fly--key-convert-table
@@ -3265,13 +3329,13 @@ The key is remapped from Dvorak to the current keyboard layout by `xah-fly--conv
 If Direct-p is t, do not remap key to current keyboard layout.
 Example usage:
  (xah-fly--define-keys
-  (define-prefix-command 'xyz-map)
-  '(
+  (define-prefix-command \\='xyz-map)
+  \\='(
     (\"h\" . highlight-symbol-at-point)
     (\".\" . isearch-forward-symbol-at-point)
     (\"w\" . isearch-forward-word)))
 Created: 2020-04-18
-Version: 2025-10-07"
+Version: 2023-08-21"
   (mapcar
    (lambda (x)
      (define-key
@@ -3280,7 +3344,7 @@ Version: 2025-10-07"
       (cdr x)))
    KeyCmdAlist))
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
 ;; keymaps
 
 (defvar xah-fly-key-map (make-sparse-keymap)
@@ -3294,7 +3358,7 @@ Version: 2025-10-07"
 
 (defvar xah-fly--deactivate-command-mode-func nil)
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
 ;; setting keys
 
 (defun xah-fly-define-keys ()
@@ -3312,12 +3376,16 @@ Version: 2024-04-22"
 
     (xah-fly--define-keys
      xah-fly-command-map
-     '(("<escape>" . xah-fly-command-mode-activate))
+     '(("<escape>" . xah-fly-command-mode-activate)
+       ("<home>" . xah-fly-command-mode-activate)
+       ("<f8>" . xah-fly-command-mode-activate))
      :direct)
 
     (xah-fly--define-keys
      xah-fly-insert-map
-     '(("<escape>" . xah-fly-command-mode-activate))
+     '(("<escape>" . xah-fly-command-mode-activate)
+       ("<home>" . xah-fly-command-mode-activate)
+       ("<f8>" . xah-fly-command-mode-activate))
      :direct)
 
     (when xah-fly-use-isearch-arrows
@@ -3354,9 +3422,9 @@ Version: 2024-04-22"
        (". c" . highlight-lines-matching-regexp)
        (". h" . highlight-regexp)
        (". t" . highlight-phrase)
-       (". p" . isearch-forward-symbol-at-point)
+       (". e" . isearch-forward-symbol-at-point)
        (". u" . isearch-forward-symbol)
-       (". e" . isearch-forward-word)
+       (". p" . isearch-forward-word)
 
        ("'" . xah-fill-or-unfill)
 
@@ -3366,6 +3434,13 @@ Version: 2024-04-22"
        ;; - / ; = [
        ("\\" . toggle-input-method)
        ;; `
+
+       ("3" . delete-window)
+       ("4" . split-window-right)
+       ("5" . balance-windows)
+       ("6" . xah-upcase-sentence)
+
+       ("9" . ispell-word)
 
        ("a" . mark-whole-buffer)
        ("b" . end-of-buffer)
@@ -3470,163 +3545,127 @@ Version: 2024-04-22"
        ("h u" . elisp-index-search)
        ("h v" . apropos-value)
        ("h x" . describe-command) ; emacs 28
-
+       ;; y
        ("h z" . describe-coding-system)
 
-       ("i SPC" . set-mark-command)
-       ("i w" . kill-line)
-       ("i i" . exchange-point-and-mark)
-       ("i m" . xah-pop-local-mark-ring)
-       ("i j" . xah-show-kill-ring)
-       ("i d" . xah-delete-current-text-block)
-       ("i h" . xah-select-block)
-       ("i t" . xah-select-text-in-quote)
-       ("i s" . xah-select-line)
-
+       ("i" . kill-line)
        ("j" . xah-copy-all-or-region)
-
-       ("k b" . xah-upcase-sentence)
-       ("k c" . enlarge-window)
-       ("k h" . delete-other-windows)
-       ("k m" . split-window-below)
-       ("k n" . balance-windows)
-       ("k s" . ispell-word)
-       ("k t" . delete-window)
-       ("k w" . split-window-right)
+       ("k" . xah-show-kill-ring)
 
        ("l" . recenter-top-bottom)
+
        ("m" . dired-jump)
 
-       ;; commands here are harmless. they don't modify text etc. they turn on modes, change display, prompt, start shell, etc.
+       ;; ("m e" . delete-other-windows)
+       ;; ("m u" . split-window-below)
+       ;; ("m w" . universal-argument)
 
-       ("n SPC SPC" . whitespace-mode)
-
-       ("n SPC t" . visual-line-mode)
-       ("n SPC h" . toggle-word-wrap)
-       ("n SPC n" . variable-pitch-mode)
-       ("n SPC s" . toggle-truncate-lines)
-       ("n SPC d" . display-line-numbers-mode)
-
-       ("n SPC ," . global-hl-line-mode)
-
+       ;; commands here are “harmless”, they don't modify text etc. they turn on modes, change display, prompt, start shell, etc.
+       ("n SPC" . whitespace-mode)
        ("n ," . abbrev-mode)
-       ("n ." . toggle-frame-maximized) ; xxwindow
+       ("n ." . toggle-frame-maximized)
        ("n 1" . set-input-method)
+       ("n 2" . global-hl-line-mode)
+       ("n 4" . global-display-line-numbers-mode)
        ("n 6" . calendar)
-       ("n 7" . calc)
-       ("n 9" . nil)
-       ("n 0" . nil)
+       ("n 7" . full-calc)
+       ("n 9" . shell-command)
+       ("n 0" . shell-command-on-region)
 
        ("n <up>" . xah-page-up)
        ("n <down>" . xah-page-down)
 
-       ("n a" . global-text-scale-adjust)
+       ("n a" . text-scale-adjust)
        ("n b" . toggle-debug-on-error)
        ("n c" . toggle-case-fold-search)
-       ("n d" . nil)
+       ;; d
        ("n e" . eshell)
-       ("n f" . shell-command-on-region)
-       ("n g" . shell-command)
+       ;; f
+       ("n g" . xah-toggle-read-novel-mode)
        ("n h" . widen)
        ("n i" . make-frame-command)
        ("n j" . flyspell-buffer)
        ("n k" . menu-bar-open)
-       ("n l" . nil)
-       ("n m" . jump-to-register) ; bad orig
+       ("n l" . toggle-word-wrap)
+       ("n m" . jump-to-register)
        ("n n" . xah-narrow-to-region)
-       ("n o" . nil)
+       ("n o" . variable-pitch-mode)
        ("n p" . read-only-mode)
-       ("n q" . nil)
+       ("n q" . enlarge-window)
        ("n r" . count-words)
        ("n s" . count-matches)
        ("n t" . narrow-to-defun)
        ("n u" . shell)
-       ("n v" . nil)
-       ("n w" . eww) ; xxmode
+       ("n v" . visual-line-mode)
+       ("n w" . eww)
        ("n x" . save-some-buffers)
-       ("n y" . nil)
+       ("n y" . toggle-truncate-lines)
        ("n z" . abort-recursive-edit)
 
-       ("o" . query-replace)
+       ("o" . exchange-point-and-mark)
        ("p" . query-replace)
-
        ("q" . xah-cut-all-or-region)
 
        ;; roughly text replacement related
-
+       ("r SPC" . rectangle-mark-mode)
        ("r ," . apply-macro-to-region-lines)
        ("r ." . kmacro-start-macro)
-
+       ("r /" . xah-slash-to-double-backslash)
        ("r 3" . number-to-register)
        ("r 4" . increment-register)
-       ("r RET" . nil)
-       ("r SPC" . nil)
 
-       ("r a" . nil)
-       ("r b" . nil)
+       ;; a
+       ;; b
        ("r c" . string-rectangle)
        ("r d" . delete-rectangle)
        ("r e" . call-last-kbd-macro)
-       ("r f" . nil)
-       ("r g" . nil)
+       ;; f
+
        ("r h" . xah-change-bracket-pairs)
        ("r i" . xah-space-to-newline)
        ("r j" . copy-rectangle-to-register)
        ("r k" . yank-rectangle)
        ("r l" . clear-rectangle)
-
-       ("r m e" . xah-append-to-register-1)
-       ("r m j" . xah-copy-to-register-1)
-       ("r m k" . xah-paste-from-register-1)
-       ("r m u" . xah-clear-register-1)
-
+       ("r m" . xah-slash-to-backslash)
        ("r n" . rectangle-number-lines)
        ("r o" . open-rectangle)
        ("r p" . kmacro-end-macro)
        ("r q" . kill-rectangle)
 
-       ("r r" . rectangle-mark-mode)
-
-       ("r s e" . xah-slash-to-backslash)
-       ("r s h" . xah-slash-to-double-backslash)
-       ("r s m" . xah-double-backslash-to-slash)
-       ("r s s" . xah-double-backslash-to-single)
-       ("r s t" . xah-double-backslash)
-       ("r s u" . xah-backslash-to-slash)
+       ;; r
+       ;; s
 
        ;; kmacro-end-and-call-macro
-       ("r t RET" . kmacro-edit-macro)
-       ("r t SPC" . kmacro-step-edit-macro)
-       ("r t TAB" . kmacro-insert-counter)
-       ;; kmacro-start-macro-or-insert-counter
 
-       ("r t a" . kmacro-add-counter)
-       ("r t b" . kmacro-bind-to-key)
-       ("r t c" . kmacro-set-counter)
-       ("r t d" . kmacro-redisplay)
-       ("r t e" . edit-kbd-macro)
-       ("r t f" . kmacro-set-format)
-       ("r t g" . kmacro-delete-ring-head)
-       ("r t h" . kmacro-edit-macro-repeat)
-       ("r t i" . kmacro-call-ring-2nd-repeat)
-       ("r t j" . kmacro-cycle-ring-next)
-       ("r t k" . kmacro-end-or-call-macro-repeat)
-       ("r t l" . kmacro-edit-lossage)
+       ("r t RET" . #'kmacro-edit-macro)
+       ("r t SPC" . #'kmacro-step-edit-macro)
+       ("r t TAB" . #'kmacro-insert-counter)
+       ("r t a" . #'kmacro-add-counter)
+       ("r t b" . #'kmacro-bind-to-key)
+       ("r t c" . #'kmacro-set-counter)
+       ("r t d" . #'kmacro-redisplay)
+       ("r t e" . #'edit-kbd-macro)
+       ("r t f" . #'kmacro-set-format)
+       ("r t g" . #'kmacro-delete-ring-head)
+       ("r t h" . #'kmacro-edit-macro-repeat)
+       ("r t i" . #'kmacro-call-ring-2nd-repeat)
+       ("r t j" . #'kmacro-cycle-ring-next)
+       ("r t k" . #'kmacro-end-or-call-macro-repeat)
+       ("r t l" . #'kmacro-edit-lossage)
 
-       ("r t n" . kmacro-name-last-macro)
-       ("r t p" . kmacro-cycle-ring-previous)
-       ("r t q" . kbd-macro-query)
-       ("r t t" . kmacro-swap-ring)
-       ("r t u" . nil)
+       ("r t n" . #'kmacro-name-last-macro)
+       ("r t p" . #'kmacro-cycle-ring-previous)
+       ("r t q" . #'kbd-macro-query)
 
-       ("r t v" . kmacro-view-macro-repeat)
-       ("r t x" . kmacro-to-register)
+       ("r t t" . #'kmacro-swap-ring)
+       ("r t v" . #'kmacro-view-macro-repeat)
+       ("r t x" . #'kmacro-to-register)
+
        ("r u" . xah-quote-lines)
-       ("r v" . nil)
-       ("r w" . nil)
-       ("r x" . nil)
+       ;; v w
+       ("r x" . xah-double-backslash-to-slash)
        ("r y" . delete-whitespace-rectangle)
-       ("r z" . nil)
+       ;; z
 
        ("s" . save-buffer)
 
@@ -3636,37 +3675,46 @@ Version: 2024-04-22"
 
        ("t ," . sort-numeric-fields)
        ("t ." . xah-sort-lines)
-       ("t a" . nil)
-       ("t b" . xah-backward-punct)
+       ("t 1" . xah-append-to-register-1)
+       ("t 2" . xah-clear-register-1)
+       ("t 3" . xah-copy-to-register-1)
+       ("t 4" . xah-paste-from-register-1)
+       ("t 7" . xah-append-to-register-1)
+       ("t 8" . xah-clear-register-1)
+       ;; a
+       ;; b
+
        ("t c" . copy-matching-lines)
        ("t d" . mark-defun)
        ("t e" . list-matching-lines)
        ("t f" . move-to-column)
-       ("t g" . xah-goto-line)
+       ("t g" . goto-line)
        ("t h" . repeat-complex-command)
        ("t i" . delete-non-matching-lines)
        ("t j" . copy-to-register)
        ("t k" . insert-register)
-       ("t l" . xah-cycle-hyphen-lowline-space)
+
+       ;; l
        ("t m" . xah-make-backup-and-save)
-       ("t n" . xah-goto-char)
+       ("t n" . goto-char)
        ("t o" . xah-clean-whitespace)
        ("t p" . query-replace-regexp)
        ("t q" . xah-cut-text-in-quote)
        ("t r" . xah-escape-quotes)
+
        ("t s" . xah-reformat-to-sentence-lines)
        ("t t" . repeat)
        ("t u" . kill-matching-lines)
-       ("t v" . nil)
+
        ("t w" . xah-next-window-or-frame)
        ("t x" . xah-title-case-region-or-line)
        ("t y" . delete-duplicate-lines)
-       ("t z" . nil)
+
        ("u" . switch-to-buffer)
        ("v" . universal-argument)
 
        ;; dangerous map. run program, delete file, etc
-       ("w d" . xah-delete-current-file-make-backup)
+       ("w DEL" . xah-delete-current-file-make-backup)
        ("w ." . eval-buffer)
        ("w e" . eval-defun)
        ("w m" . eval-last-sexp)
@@ -3677,8 +3725,7 @@ Version: 2024-04-22"
        ("w j" . xah-run-current-file)
 
        ("x" . xah-toggle-previous-letter-case)
-
-       ("y" . nil)
+       ;; y
 
        ;; vc command keys subject to change. need a frequency stat of the commands.
 
@@ -3716,22 +3763,32 @@ Version: 2024-04-22"
        (";" . xah-comment-dwim)
        ("[" . split-window-below)
        ("\\" . xah-cycle-hyphen-lowline-space)
-       ("]" . split-window-right)
+       ;; ("]" . split-window-right)
        ("`" . other-frame)
+
+       ("1" . xah-backward-punct)
+       ("2" . xah-forward-punct)
+       ("3" . delete-other-windows)
+       ("4" . split-window-below)
+       ("5" . delete-char)
+       ("6" . xah-select-block)
+       ("7" . xah-select-line)
+       ("8" . xah-extend-selection)
+       ("9" . xah-select-text-in-quote)
+       ("0" . xah-pop-local-mark-ring)
 
        ("a" . execute-extended-command)
        ("b" . isearch-forward)
        ("c" . previous-line)
        ("d" . xah-beginning-of-line-or-block)
        ("e" . xah-smart-delete)
-       ("E" . delete-backward-char)
        ("f" . undo)
        ("g" . backward-word)
        ("h" . backward-char)
-       ("i" . xah-extend-selection)
-
+       ("i" . xah-delete-current-text-block)
        ("j" . xah-copy-line-or-region)
        ("k" . xah-paste-or-paste-previous)
+       ;; ("l" . xah-fly-insert-mode-activate-space-before)
        ("l" . xah-insert-space-before)
        ("m" . xah-backward-left-bracket)
        ("n" . forward-char)
@@ -3745,7 +3802,7 @@ Version: 2024-04-22"
        ("v" . xah-forward-right-bracket)
        ("w" . xah-next-window-or-frame)
        ("x" . xah-toggle-letter-case)
-       ("y" . xah-fly-cancel)
+       ("y" . set-mark-command)
        ("z" . xah-goto-matching-bracket)))
 
     ;;
@@ -3753,7 +3810,7 @@ Version: 2024-04-22"
 
 (xah-fly-define-keys)
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
 ;; set control meta, etc keys
 
 (defcustom xah-fly-unset-useless-key t
@@ -3765,13 +3822,12 @@ Version: 2024-04-22"
   (global-set-key (kbd "<help>") nil)
   (global-set-key (kbd "<f1>") nil))
 
-  (global-set-key (kbd "M-SPC") #'xah-fly-command-mode-activate)
-
 (when xah-fly-use-meta-key
 
   (global-set-key (kbd "M-<home>") nil) ; beginning-of-buffer-other-window
   (global-set-key (kbd "M-<end>") nil) ; end-of-buffer-other-window
 
+  (global-set-key (kbd "M-SPC") #'xah-fly-command-mode-activate)
   (global-set-key (kbd "M-\\") nil) ; delete-horizontal-space
   (global-set-key (kbd "M-!") nil)  ; shell-command
   (global-set-key (kbd "M-$") nil)  ; ispell-word
@@ -3808,7 +3864,7 @@ Version: 2024-04-22"
   (global-set-key (kbd "M-o") nil) ; facemenu-keymap
   (global-set-key (kbd "M-q") nil) ; fill-paragraph
   (global-set-key (kbd "M-r") nil) ; move-to-window-line-top-bottom
-  ;; (global-set-key (kbd "M-s") nil) ; Prefix Command
+  (global-set-key (kbd "M-s") nil) ; Prefix Command
   (global-set-key (kbd "M-t") nil) ; transpose-words
   (global-set-key (kbd "M-u") nil) ; upcase-word
   (global-set-key (kbd "M-v") nil) ; scroll-down-command
@@ -3821,24 +3877,26 @@ Version: 2024-04-22"
   (global-set-key (kbd "M-}") nil)   ; forward-paragraph
   (global-set-key (kbd "M-~") nil)   ; not-modified
   (global-set-key (kbd "M-DEL") nil) ; backward-kill-word
-
-  ;;
   )
-
-(when xah-fly-remove-control-x-keys (global-set-key (kbd "C-x") nil))
 
 (when xah-fly-use-control-key
 
-  (global-set-key (kbd "C-<tab>") #'xah-next-user-buffer)
-  (global-set-key (kbd "C-S-<tab>") #'xah-previous-user-buffer)
+  (global-set-key (kbd "<C-S-prior>") #'xah-previous-emacs-buffer)
+  (global-set-key (kbd "<C-S-next>") #'xah-next-emacs-buffer)
 
-  (global-set-key (kbd "C-<prior>") #'xah-previous-user-buffer)
-  (global-set-key (kbd "C-<next>") #'xah-next-user-buffer)
+  (global-set-key (kbd "<C-tab>") #'xah-next-user-buffer)
+  (global-set-key (kbd "<C-S-tab>") #'xah-previous-user-buffer)
+  (global-set-key (kbd "<C-S-iso-lefttab>") #'xah-previous-user-buffer)
 
+  (global-set-key (kbd "<C-prior>") #'xah-previous-user-buffer)
+  (global-set-key (kbd "<C-next>") #'xah-next-user-buffer)
+
+  ;; (global-set-key (kbd "C-1") nil)
   (global-set-key (kbd "C-2") #'pop-global-mark)
   (global-set-key (kbd "C-3") #'previous-error)
   (global-set-key (kbd "C-4") #'next-error)
-
+  (global-set-key (kbd "C-5") #'xah-previous-emacs-buffer)
+  (global-set-key (kbd "C-6") #'xah-next-emacs-buffer)
   (global-set-key (kbd "C-7") #'xah-previous-user-buffer)
   (global-set-key (kbd "C-8") #'xah-next-user-buffer)
   (global-set-key (kbd "C-9") #'xah-page-up)
@@ -3853,28 +3911,45 @@ Version: 2024-04-22"
   (global-set-key (kbd "C-S-s") #'write-file)
   (global-set-key (kbd "C-S-t") #'xah-open-last-closed)
 
-  (global-set-key (kbd "C-a") #'mark-whole-buffer)
+  ;; (global-set-key (kbd "C-@") nil)
 
+  (global-set-key (kbd "C-a") #'mark-whole-buffer)
+  (global-set-key (kbd "C-b") nil)
+  ;; (global-set-key (kbd "C-c") nil)
+  (global-set-key (kbd "C-d") nil)
+  (global-set-key (kbd "C-e") nil)
+  (global-set-key (kbd "C-f") nil)
+  ;; (global-set-key (kbd "C-g") nil) ; cancel
+  ;; (global-set-key (kbd "C-h") nil) ; help
+  ;; (global-set-key (kbd "C-i") nil) ; tab
+  ;; (global-set-key (kbd "C-j") nil) ; newline
+  (global-set-key (kbd "C-k") nil)
+  (global-set-key (kbd "C-l") nil)
+  ;; (global-set-key (kbd "C-m") nil) ; newline
   (global-set-key (kbd "C-n") #'xah-new-empty-buffer)
   (global-set-key (kbd "C-o") #'find-file)
-
+  (global-set-key (kbd "C-p") nil)
+  ;; (global-set-key (kbd "C-q") nil) ; quoted-insert
+  ;; (global-set-key (kbd "C-r") nil)
   (global-set-key (kbd "C-s") #'save-buffer)
   (global-set-key (kbd "C-t") #'hippie-expand)
+  ;; (global-set-key (kbd "C-u") nil) ; universal-argument
   (global-set-key (kbd "C-v") #'yank)
   (global-set-key (kbd "C-w") #'xah-close-current-buffer)
-  (global-set-key (kbd "C-y") #'undo-redo)
+  (global-set-key (kbd "C-x") nil) ; c-x map
+  (global-set-key (kbd "C-y") #'undo-redo) ; emacs 28
   (global-set-key (kbd "C-z") #'undo)
   ;;
   )
 
   (global-set-key (kbd "<f7>") 'xah-fly-leader-key-map)
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
 
 (when (< emacs-major-version 28)
   (defalias 'execute-extended-command-for-buffer #'execute-extended-command))
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
 ;;;; misc
 
 ;; the following have keys in gnu emacs, but i decided not to give them a key, because either they are rarely used (say, 95% of emacs users use them less than once a month ), or there is a more efficient command/workflow with key in xah-fly-keys
@@ -3942,7 +4017,7 @@ Version: 2024-04-22"
 ;; C-x {   →   shrink-window-horizontally
 ;; C-x }   →   enlarge-window-horizontally
 
-;; s------------------------------
+;; HHHH---------------------------------------------------
 
 (defvar xah-fly-insert-state-p t "non-nil means insertion mode is on.")
 
@@ -3996,8 +4071,8 @@ Version: 2022-07-06"
   (setq xah-fly--deactivate-command-mode-func
         (set-transient-map xah-fly-command-map (lambda () t)))
   (modify-all-frames-parameters (list (cons 'cursor-type 'box)))
-  (if xah-fly-command-mode-cursor-color
-      (set-face-background 'cursor xah-fly-command-mode-cursor-color))
+  ;; (set-face-background 'cursor "red")
+  (setq mode-line-front-space xah-fly-command-mode-indicator)
   (force-mode-line-update))
 
 (defun xah-fly-insert-mode-init (&optional no-indication)
@@ -4008,8 +4083,8 @@ Version: 2022-07-06"
   (funcall xah-fly--deactivate-command-mode-func)
   (unless no-indication
     (modify-all-frames-parameters '((cursor-type . bar)))
-    (if xah-fly-insert-mode-cursor-color
-        (set-face-background 'cursor xah-fly-insert-mode-cursor-color)))
+    ;; (set-face-background 'cursor "black")
+    (setq mode-line-front-space xah-fly-insert-mode-indicator))
   (force-mode-line-update))
 
 (defun xah-fly-mode-toggle ()
@@ -4030,7 +4105,6 @@ Version: 2022-07-06"
 Version: 2017-07-07"
   (interactive)
   (xah-fly-command-mode-init)
-  (when xah-fly-command-mode-hl-line (progn (global-hl-line-mode 1)))
   (run-hooks 'xah-fly-command-mode-activate-hook))
 
 (defun xah-fly-command-mode-activate-no-hook ()
@@ -4044,7 +4118,6 @@ Version: 2017-07-07"
 Version: 2017-07-07"
   (interactive)
   (xah-fly-insert-mode-init)
-  (when xah-fly-command-mode-hl-line (progn (global-hl-line-mode 0)))
   (run-hooks 'xah-fly-insert-mode-activate-hook))
 
 (defun xah-fly-insert-mode-activate-newline ()
@@ -4053,31 +4126,52 @@ Version: 2017-07-07"
   (xah-fly-insert-mode-activate)
   (open-line 1))
 
-;; s------------------------------
+(defun xah-fly-insert-mode-activate-space-before ()
+  "Insert a space, then activate insertion mode."
+  (interactive)
+  (insert " ")
+  (xah-fly-insert-mode-activate))
+
+(defun xah-fly-insert-mode-activate-space-after ()
+  "Insert a space, then activate insertion mode."
+  (interactive)
+  (insert " ")
+  (xah-fly-insert-mode-activate)
+  (left-char))
+
+;; HHHH---------------------------------------------------
 
 ;;;###autoload
 (define-minor-mode xah-fly-keys
-  "A modal keybinding set, like vim, but based on ergonomic principles, like Dvorak layout.
+  "A modal keybinding set, like vim, but based on ergonomic
+  principles, like Dvorak layout.
 
 URL `http://xahlee.info/emacs/misc/xah-fly-keys.html'"
   :global t
-  :lighter "XFK"
+  :lighter " xflykeys"
   :keymap xah-fly-insert-map
   (delete-selection-mode 1)
   (setq shift-select-mode nil)
+
   (if xah-fly-keys
+      ;; Construction:
       (progn
-        (when (fboundp 'which-key-mode) (which-key-mode 1))
         (add-hook 'minibuffer-setup-hook 'xah-fly-insert-mode-activate)
         (add-hook 'minibuffer-exit-hook 'xah-fly-command-mode-activate)
         (add-hook 'isearch-mode-end-hook 'xah-fly-command-mode-activate)
         (xah-fly-command-mode-activate))
     (progn
-      (when (fboundp 'which-key-mode) (which-key-mode 0))
+      ;; Teardown:
       (remove-hook 'minibuffer-setup-hook 'xah-fly-insert-mode-activate)
       (remove-hook 'minibuffer-exit-hook 'xah-fly-command-mode-activate)
       (remove-hook 'isearch-mode-end-hook 'xah-fly-command-mode-activate)
-      (xah-fly-insert-mode-init :no-indication))))
+      (remove-hook 'eshell-mode-hook 'xah-fly-insert-mode-activate)
+      (remove-hook 'shell-mode-hook 'xah-fly-insert-mode-activate)
+      (xah-fly-insert-mode-init :no-indication)
+      (setq mode-line-front-space '(:eval (if (display-graphic-p) " " "-")))
+
+      ;;
+      )))
 
 (provide 'xah-fly-keys)
 
